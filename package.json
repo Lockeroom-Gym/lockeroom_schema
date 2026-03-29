@@ -1,0 +1,15 @@
+{
+  "name": "lockerroom-schema-tools",
+  "version": "1.0.0",
+  "description": "Schema diagram + auto-update tools for Locker Room Gym database",
+  "scripts": {
+    "update-schema": "node update-schema.js",
+    "open-diagram": "open schema-neural-map.html"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

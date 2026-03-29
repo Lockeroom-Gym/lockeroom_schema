@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locker Room Gym — Schema Neural Map</title>
+<style>
+  :root {
+    --bg: #03030a;
+    --panel-bg: rgba(10, 10, 24, 0.93);
+    --border: rgba(255,255,255,0.07);
+    --text: #e2e8f0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    overflow: hidden;
+    height: 100vh; width: 100vw;
+  }
+  svg { width: 100%; height: 100%; display: block; }
+
+  /* Header */
+  #header {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 14px 20px;
+    background: linear-gradient(180deg, rgba(3,3,10,0.98) 0%, transparent 100%);
+    display: flex; align-items: center; gap: 14px; z-index: 100;
+  }
+  .header-title { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.08em; }
+  .header-sub { font-size: 9px; color: rgba(255,255,255,0.3); letter-spacing: 0.14em; margin-top: 2px; }
+  #header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  #search {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; padding: 6px 12px; color: #fff; font-size: 11px;
+    font-family: inherit; width: 190px; outline: none; transition: border-color 0.2s;
+  }
+  #search:focus { border-color: rgba(255,255,255,0.28); }
+  #search::placeholder { color: rgba(255,255,255,0.25); }
+  .ctrl-btn {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; padding: 6px 11px; color: rgba(255,255,255,0.55);
+    font-size: 11px; cursor: pointer; font-family: inherit; transition: all 0.15s;
+  }
+  .ctrl-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  #gen-date { font-size: 9px; color: rgba(255,255,255,0.2); letter-spacing: 0.06em; }
+
+  /* Stats bar */
+  #stats {
+    position: absolute; left: 18px; top: 56px;
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 16px; backdrop-filter: blur(20px);
+    z-index: 100; display: flex; gap: 18px; align-items: center;
+  }
+  .stat { text-align: center; }
+  .stat-val { font-size: 20px; font-weight: 800; color: #fff; line-height: 1; }
+  .stat-lbl { font-size: 8px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 2px; }
+  .stat-div { width: 1px; height: 28px; background: rgba(255,255,255,0.07); }
+
+  /* Legend */
+  #legend {
+    position: absolute; left: 18px; bottom: 18px;
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px; backdrop-filter: blur(20px); z-index: 100;
+  }
+  .legend-hdr { font-size: 8px; color: rgba(255,255,255,0.28); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px; }
+  .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; }
+  .legend-row {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10px; color: rgba(255,255,255,0.55); cursor: pointer;
+    padding: 2px 0; transition: color 0.15s; user-select: none;
+  }
+  .legend-row:hover { color: #fff; }
+  .legend-row.dimmed { opacity: 0.3; }
+  .ldot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Info panel */
+  #info-panel {
+    position: absolute; right: 18px; top: 56px;
+    width: 270px;
+    background: var(--panel-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; backdrop-filter: blur(20px);
+    z-index: 100; display: none;
+  }
+  #info-panel.vis { display: block; }
+  .itag {
+    display: inline-block; padding: 3px 9px; border-radius: 20px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+    margin-bottom: 9px; text-transform: uppercase;
+  }
+  .ititle { font-size: 12px; font-weight: 600; color: #fff; margin-bottom: 5px; word-break: break-all; }
+  .idesc { font-size: 11px; color: rgba(255,255,255,0.5); line-height: 1.6; margin-bottom: 11px; font-family: -apple-system, sans-serif; }
+  .istat { font-size: 10px; color: rgba(255,255,255,0.35); margin-bottom: 11px; }
+  .icon-hdr { font-size: 8px; color: rgba(255,255,255,0.25); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 5px; }
+  .icon-item { font-size: 10px; color: rgba(255,255,255,0.45); padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; }
+  .icon-item span { color: rgba(255,255,255,0.2); font-size: 9px; }
+  #info-close { float: right; cursor: pointer; color: rgba(255,255,255,0.25); font-size: 16px; line-height: 1; margin-top: -2px; }
+  #info-close:hover { color: #fff; }
+
+  /* Tooltip */
+  #tooltip {
+    position: absolute; background: rgba(5,5,20,0.95); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; padding: 7px 11px; font-size: 11px; color: rgba(255,255,255,0.8);
+    pointer-events: none; z-index: 200; display: none; max-width: 200px;
+    font-family: -apple-system, sans-serif; line-height: 1.5;
+  }
+
+  /* SVG styles */
+  .node-label { font-size: 7.5px; fill: rgba(255,255,255,0.4); pointer-events: none; font-family: 'SF Mono', monospace; }
+  .hull-path { pointer-events: none; }
+  .link-line { transition: opacity 0.25s; }
+
+  /* Pulse animation */
+  @keyframes dash-flow {
+    to { stroke-dashoffset: -40; }
+  }
+  .link-active {
+    animation: dash-flow 1.2s linear infinite;
+    stroke-dasharray: 6 4;
+  }
+</style>
+</head>
+<body>
+<div id="header">
+  <div>
+    <div class="header-title">⬡ LOCKER ROOM GYM</div>
+    <div class="header-sub">DATABASE SCHEMA — NEURAL MAP</div>
+  </div>
+  <span id="gen-date">Generated: 2026-03-30</span>
+  <div id="header-right">
+    <input type="text" id="search" placeholder="Search tables…" />
+    <button class="ctrl-btn" id="reset-btn">↺ Reset</button>
+    <button class="ctrl-btn" id="expand-btn">⊕ Expand All</button>
+  </div>
+</div>
+
+<div id="stats">
+  <div class="stat"><div class="stat-val" id="sv-tables">75</div><div class="stat-lbl">Tables</div></div>
+  <div class="stat-div"></div>
+  <div class="stat"><div class="stat-val" id="sv-links">0</div><div class="stat-lbl">Relations</div></div>
+  <div class="stat-div"></div>
+  <div class="stat"><div class="stat-val">10</div><div class="stat-lbl">Domains</div></div>
+  <div class="stat-div"></div>
+  <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Gyms</div></div>
+</div>
+
+<svg id="graph">
+  <defs>
+    <radialGradient id="bg-grad" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#080818"/>
+      <stop offset="100%" stop-color="#03030a"/>
+    </radialGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg-grad)"/>
+</svg>
+
+<div id="info-panel">
+  <span id="info-close">×</span>
+  <div class="itag" id="itag">domain</div>
+  <div class="ititle" id="ititle">table_name</div>
+  <div class="idesc" id="idesc">Description goes here.</div>
+  <div class="istat" id="istat"></div>
+  <div class="icon-hdr">Connected Tables</div>
+  <div id="icon-list"></div>
+</div>
+
+<div id="legend">
+  <div class="legend-hdr">Domains</div>
+  <div class="legend-grid" id="legend-grid"></div>
+</div>
+
+<div id="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+// ============================================================
+// SCHEMA DATA  — run `node update-schema.js` to regenerate
+// ============================================================
+/* SCHEMA_DATA_START */
+const DOMAINS = {
+  members:     { label: "Members",            color: "#00E5FF" },
+  staff:       { label: "Staff & Coaches",    color: "#64FFDA" },
+  scheduling:  { label: "Scheduling",         color: "#CE93D8" },
+  finance:     { label: "Finance",            color: "#FFD54F" },
+  health:      { label: "Health & Physicals", color: "#FF6E6E" },
+  crm:         { label: "CRM & Sales",        color: "#FFB74D" },
+  programming: { label: "Programming",        color: "#A5D6A7" },
+  coach_ops:   { label: "Coach Operations",   color: "#F48FB1" },
+  pm:          { label: "Project Mgmt",       color: "#81D4FA" },
+  system:      { label: "System Config",      color: "#90A4AE" },
+};
+
+const RAW_NODES = [
+  // MEMBERS
+  { id:"member_database",        domain:"members",     hub:true,  desc:"Core member records — the central hub for all member data" },
+  { id:"member_memberships",     domain:"members",     hub:false, desc:"Membership contracts per member (one row per period/renewal)" },
+  { id:"member_holds",           domain:"members",     hub:false, desc:"Membership pause periods — active holds don't change member status" },
+  { id:"member_programs",        domain:"members",     hub:false, desc:"Programming assignments: who writes programs for each member" },
+  { id:"member_addons",          domain:"members",     hub:false, desc:"Add-on products (extras) attached to memberships" },
+  { id:"membership_types",       domain:"members",     hub:false, desc:"Product catalogue: session frequency, duration, category" },
+  { id:"holds_policies",         domain:"members",     hub:false, desc:"Hold policy rules: duration limits, credit calculations" },
+  { id:"sale_types",             domain:"members",     hub:false, desc:"Reference: types of sales (new, renewal, etc.)" },
+  { id:"member_not_renewing",    domain:"members",     hub:false, desc:"Members confirmed as not renewing their membership" },
+  { id:"membership_versions",    domain:"members",     hub:false, desc:"Version history of membership type configurations" },
+
+  // STAFF
+  { id:"staff_database",         domain:"staff",       hub:true,  desc:"All Locker Room staff and coaches — the people who run the gym" },
+  { id:"staff_leave_requests",   domain:"staff",       hub:false, desc:"Leave requests submitted by staff members" },
+  { id:"staff_leave_confirmed",  domain:"staff",       hub:false, desc:"Confirmed and approved staff leave periods" },
+  { id:"staff_onboarding",       domain:"staff",       hub:false, desc:"Onboarding task tracking for new staff" },
+  { id:"staff_anniversary",      domain:"staff",       hub:false, desc:"Staff work anniversary tracking" },
+  { id:"staff_personal_vision",  domain:"staff",       hub:false, desc:"Personal vision documents submitted by staff" },
+
+  // SCHEDULING
+  { id:"schedule_sessions",      domain:"scheduling",  hub:true,  desc:"Every scheduled gym session across all three locations" },
+  { id:"schedule_session_coaches", domain:"scheduling",hub:false, desc:"Junction: which coach covers which session" },
+  { id:"schedule_final",         domain:"scheduling",  hub:false, desc:"Locked final schedule — confirmed coach block assignments per week" },
+  { id:"schedule_preferences",   domain:"scheduling",  hub:false, desc:"Coach preferences per block: HARD (unavailable) / SOFT / PREFERRED" },
+  { id:"schedule_periods",       domain:"scheduling",  hub:false, desc:"Multi-week planning periods for the schedule" },
+  { id:"schedule_block_config",  domain:"scheduling",  hub:false, desc:"Time configuration for each schedule block (e.g. MON_EARLY)" },
+  { id:"schedule_calendar_blocks",domain:"scheduling", hub:false, desc:"Calendar-level block definitions and overrides" },
+  { id:"system_session_types",   domain:"scheduling",  hub:false, desc:"Session type catalogue (performance, boxing, online, etc.)" },
+  { id:"system_session_gym_capacity", domain:"scheduling", hub:false, desc:"Max member capacity per session type per gym" },
+  { id:"rolling_schedule_preferences", domain:"scheduling", hub:false, desc:"Rolling preference snapshots across periods" },
+
+  // FINANCE
+  { id:"stripe_customers",       domain:"finance",     hub:true,  desc:"Stripe customer records linked to Locker Room members" },
+  { id:"stripe_invoices",        domain:"finance",     hub:false, desc:"ALL Stripe invoices — primary source of truth for revenue. Amounts in AUD cents." },
+  { id:"stripe_transactions",    domain:"finance",     hub:false, desc:"Individual payment transactions and charge attempts" },
+  { id:"fin_pandl",              domain:"finance",     hub:false, desc:"P&L (Profit & Loss) financial data entries" },
+  { id:"payment_success_tracker",domain:"finance",     hub:false, desc:"Tracks payment success/failure rates over time" },
+  { id:"newsale_membership_pricelist", domain:"finance",hub:false,desc:"Price list for new membership sales" },
+  { id:"payment_statuses",       domain:"finance",     hub:false, desc:"Reference: payment status codes and descriptions" },
+
+  // HEALTH
+  { id:"member_health_metrics",  domain:"health",      hub:true,  desc:"InBody scanner body composition data: weight, BF%, muscle mass, BMR" },
+  { id:"member_physicals_raw",   domain:"health",      hub:false, desc:"Quarterly fitness assessment results: VO2, push-ups, grip, vertical jump, etc." },
+  { id:"member_memberhealth",    domain:"health",      hub:false, desc:"RAG health status per member (green/yellow/red)" },
+  { id:"member_cardio_workout_log", domain:"health",   hub:false, desc:"Cardio workout log entries for members" },
+  { id:"member_cardio_time_trials", domain:"health",   hub:false, desc:"Cardio time trial results (5min bike, 12min run, etc.)" },
+  { id:"member_biomap",          domain:"health",      hub:false, desc:"Biomap health assessment engagement records and stage tracking" },
+  { id:"member_biomap_results",  domain:"health",      hub:false, desc:"Individual biomap measurement results per assessment" },
+  { id:"biomap_measurement_types",domain:"health",     hub:false, desc:"Catalogue of all biomap measurement types" },
+  { id:"biomap_units",           domain:"health",      hub:false, desc:"Units of measurement used in biomap assessments" },
+  { id:"biomap_reference_ranges",domain:"health",      hub:false, desc:"Normal/healthy reference ranges by measurement type and demographics" },
+  { id:"physicals_quarterly_cycles", domain:"health",  hub:false, desc:"Quarterly assessment cycle periods (Q1, Q2, Q3, Q4)" },
+  { id:"physicals_scoring_lookup",domain:"health",     hub:false, desc:"Score normalisation lookup: converts raw values to 0-100 scores by age/gender" },
+
+  // CRM
+  { id:"hubspot_contacts_clean", domain:"crm",         hub:true,  desc:"HubSpot CRM contacts (leads and prospects). Synced periodically — not real-time." },
+  { id:"hubspot_deals_clean",    domain:"crm",         hub:false, desc:"HubSpot deals/opportunities in the sales pipeline" },
+  { id:"crm_contacts_clean",     domain:"crm",         hub:false, desc:"Deduplicated, cleaned CRM contacts from multiple sources" },
+  { id:"member_newsale_metadata",domain:"crm",         hub:false, desc:"Metadata captured at the point of a new membership sale" },
+  { id:"member_renewal_meta",    domain:"crm",         hub:false, desc:"Metadata captured at the point of a membership renewal" },
+  { id:"lead_referral",          domain:"crm",         hub:false, desc:"Referral records: tracks when an existing member refers a new prospect" },
+  { id:"member_referral_log",    domain:"crm",         hub:false, desc:"Log of referral touchpoint actions taken" },
+  { id:"member_referral_credits",domain:"crm",         hub:false, desc:"Credits granted to members for successful referrals" },
+
+  // PROGRAMMING
+  { id:"programming_generated",  domain:"programming", hub:true,  desc:"AI-generated personalised workout programs for members" },
+  { id:"programming_rules",      domain:"programming", hub:false, desc:"Rules engine definitions for AI program generation" },
+  { id:"programming_normalized_programs", domain:"programming", hub:false, desc:"Normalised/structured program data" },
+  { id:"programming_feedback",   domain:"programming", hub:false, desc:"Coach and member feedback on generated programs" },
+  { id:"programming_coach_edits",domain:"programming", hub:false, desc:"Manual edits made by coaches to generated programs" },
+  { id:"exercise_library",       domain:"programming", hub:false, desc:"Master exercise catalogue with movement metadata" },
+  { id:"cardio_workouts",        domain:"programming", hub:false, desc:"Cardio workout templates and definitions" },
+  { id:"teambuildr_completion_dd",domain:"programming",hub:false, desc:"TeamBuildr app workout completion data (synced daily)" },
+
+  // COACH OPS
+  { id:"coach_call_summary",     domain:"coach_ops",   hub:true,  desc:"Summary documents and links for scheduled coach calls" },
+  { id:"coach_monthly_report",   domain:"coach_ops",   hub:false, desc:"Monthly performance reports per coach" },
+  { id:"coach_wcr_logging",      domain:"coach_ops",   hub:false, desc:"Weekly Coach Report entries — coach interactions with members" },
+  { id:"coach_perf_reviews",     domain:"coach_ops",   hub:false, desc:"Formal coach performance review records" },
+  { id:"member_call_status",     domain:"coach_ops",   hub:false, desc:"Call status tracking per member (called, booked, complete)" },
+  { id:"member_coach_notes",     domain:"coach_ops",   hub:false, desc:"Free-form coaching notes written for individual members" },
+  { id:"google_reviews",         domain:"coach_ops",   hub:false, desc:"Google review submissions from members" },
+  { id:"survey_newclient_nps",   domain:"coach_ops",   hub:false, desc:"New client NPS survey responses" },
+
+  // PM / ADMIN
+  { id:"pm_projects",            domain:"pm",          hub:true,  desc:"Internal project tracking — top-level projects" },
+  { id:"pm_tasks",               domain:"pm",          hub:false, desc:"Tasks within projects, with size, status, and due dates" },
+  { id:"pm_sub_projects",        domain:"pm",          hub:false, desc:"Sub-project groupings under a parent project" },
+  { id:"pm_task_collaborators",  domain:"pm",          hub:false, desc:"Staff members assigned to collaborate on a task" },
+  { id:"pm_time_entries",        domain:"pm",          hub:false, desc:"Time logged by staff against specific tasks" },
+  { id:"admin_tickets",          domain:"pm",          hub:false, desc:"Admin/ops tickets: billing, scheduling, programming, HR issues" },
+  { id:"work_calendar",          domain:"pm",          hub:false, desc:"Work calendar: public holidays and non-working days" },
+  { id:"admin_sop",              domain:"pm",          hub:false, desc:"Standard Operating Procedures for admin workflows" },
+
+  // SYSTEM
+  { id:"system_config",          domain:"system",      hub:false, desc:"Global system configuration key-value settings" },
+  { id:"system_cj_config",       domain:"system",      hub:false, desc:"Customer journey (CJ) configuration rules" },
+  { id:"system_bracket_policy_rules", domain:"system", hub:false, desc:"Session bracket assignment policy rules for staff" },
+  { id:"membership_addons",      domain:"system",      hub:false, desc:"Add-on product catalogue (available extras)" },
+  { id:"maintenance_sops",       domain:"system",      hub:false, desc:"Maintenance SOP definitions (frequency, steps, consumables)" },
+  { id:"tech_docs",              domain:"system",      hub:false, desc:"Internal technical documentation records" },
+];
+
+const RAW_LINKS = [
+  // member_database — 24 inbound connections (the giant hub)
+  { s:"member_memberships",      t:"member_database",        lbl:"member_id" },
+  { s:"member_holds",            t:"member_database",        lbl:"member_id" },
+  { s:"member_programs",         t:"member_database",        lbl:"member_id" },
+  { s:"member_addons",           t:"member_database",        lbl:"member_id" },
+  { s:"member_health_metrics",   t:"member_database",        lbl:"member_id" },
+  { s:"member_physicals_raw",    t:"member_database",        lbl:"member_id" },
+  { s:"member_memberhealth",     t:"member_database",        lbl:"member_id" },
+  { s:"member_cardio_workout_log",t:"member_database",       lbl:"member_id" },
+  { s:"member_cardio_time_trials",t:"member_database",       lbl:"member_id" },
+  { s:"member_biomap",           t:"member_database",        lbl:"member_id" },
+  { s:"stripe_customers",        t:"member_database",        lbl:"member_id" },
+  { s:"stripe_invoices",         t:"member_database",        lbl:"member_id" },
+  { s:"stripe_transactions",     t:"member_database",        lbl:"member_id" },
+  { s:"member_newsale_metadata", t:"member_database",        lbl:"member_id" },
+  { s:"member_renewal_meta",     t:"member_database",        lbl:"member_id" },
+  { s:"lead_referral",           t:"member_database",        lbl:"referring_member" },
+  { s:"member_referral_credits", t:"member_database",        lbl:"member_id" },
+  { s:"member_referral_log",     t:"member_database",        lbl:"member_id" },
+  { s:"programming_generated",   t:"member_database",        lbl:"member_id" },
+  { s:"coach_wcr_logging",       t:"member_database",        lbl:"member_id" },
+  { s:"member_call_status",      t:"member_database",        lbl:"member_id" },
+  { s:"member_coach_notes",      t:"member_database",        lbl:"member_id" },
+  { s:"google_reviews",          t:"member_database",        lbl:"member_id" },
+  { s:"survey_newclient_nps",    t:"member_database",        lbl:"member_id" },
+  { s:"teambuildr_completion_dd",t:"member_database",        lbl:"member_id" },
+  // self-referential
+  { s:"member_database",         t:"member_database",        lbl:"referrer_id (self)" },
+
+  // staff_database — 18 inbound connections
+  { s:"member_database",         t:"staff_database",         lbl:"coach_id" },
+  { s:"member_memberships",      t:"staff_database",         lbl:"coach_id" },
+  { s:"member_physicals_raw",    t:"staff_database",         lbl:"coach_id" },
+  { s:"member_programs",         t:"staff_database",         lbl:"programming_coach_id" },
+  { s:"schedule_session_coaches",t:"staff_database",         lbl:"coach_id" },
+  { s:"schedule_final",          t:"staff_database",         lbl:"coach_id" },
+  { s:"schedule_preferences",    t:"staff_database",         lbl:"staff_id" },
+  { s:"coach_monthly_report",    t:"staff_database",         lbl:"coach_id" },
+  { s:"coach_wcr_logging",       t:"staff_database",         lbl:"coach_id" },
+  { s:"coach_perf_reviews",      t:"staff_database",         lbl:"coach_id" },
+  { s:"staff_leave_requests",    t:"staff_database",         lbl:"staff_id" },
+  { s:"staff_leave_confirmed",   t:"staff_database",         lbl:"staff_id" },
+  { s:"staff_onboarding",        t:"staff_database",         lbl:"staff_id" },
+  { s:"member_newsale_metadata", t:"staff_database",         lbl:"salesperson_id" },
+  { s:"programming_generated",   t:"staff_database",         lbl:"coach_id" },
+  { s:"pm_task_collaborators",   t:"staff_database",         lbl:"staff_id" },
+  { s:"pm_time_entries",         t:"staff_database",         lbl:"staff_id" },
+  { s:"member_coach_notes",      t:"staff_database",         lbl:"staff_id" },
+  // self-ref
+  { s:"staff_database",          t:"staff_database",         lbl:"direct_report (self)" },
+
+  // membership_types
+  { s:"member_memberships",      t:"membership_types",       lbl:"membership_type_id" },
+  { s:"member_newsale_metadata", t:"membership_types",       lbl:"membership_type_id" },
+  { s:"member_renewal_meta",     t:"membership_types",       lbl:"membership_type_id" },
+
+  // member_memberships outbound
+  { s:"member_holds",            t:"member_memberships",     lbl:"membership_id" },
+  { s:"member_programs",         t:"member_memberships",     lbl:"membership_id" },
+  { s:"stripe_invoices",         t:"member_memberships",     lbl:"membership_id" },
+  { s:"stripe_transactions",     t:"member_memberships",     lbl:"membership_id" },
+  { s:"member_physicals_raw",    t:"member_memberships",     lbl:"membership_id" },
+  { s:"lead_referral",           t:"member_memberships",     lbl:"membership_id" },
+  { s:"member_referral_credits", t:"member_memberships",     lbl:"membership_id" },
+  { s:"programming_generated",   t:"member_memberships",     lbl:"membership_id" },
+
+  // holds
+  { s:"member_holds",            t:"holds_policies",         lbl:"holds_policy_fk" },
+  { s:"member_newsale_metadata", t:"holds_policies",         lbl:"holds_policy_fk" },
+
+  // stripe
+  { s:"stripe_invoices",         t:"stripe_customers",       lbl:"stripe_customer_id" },
+  { s:"stripe_transactions",     t:"stripe_customers",       lbl:"stripe_customer_id" },
+
+  // scheduling
+  { s:"schedule_sessions",       t:"schedule_periods",       lbl:"period_id" },
+  { s:"schedule_sessions",       t:"system_session_types",   lbl:"session_type_id" },
+  { s:"schedule_session_coaches",t:"schedule_sessions",      lbl:"session_id" },
+  { s:"schedule_final",          t:"schedule_periods",       lbl:"period_id" },
+  { s:"schedule_preferences",    t:"schedule_periods",       lbl:"period_id" },
+  { s:"system_session_gym_capacity",t:"system_session_types",lbl:"session_type_id" },
+
+  // physicals
+  { s:"member_physicals_raw",    t:"physicals_quarterly_cycles", lbl:"quarter_cycle_id" },
+  { s:"physicals_scoring_lookup",t:"physicals_quarterly_cycles", lbl:"cycle_id" },
+
+  // biomap
+  { s:"member_biomap_results",   t:"member_biomap",          lbl:"biomap_id" },
+  { s:"member_biomap_results",   t:"biomap_measurement_types",lbl:"measurement_type_id" },
+  { s:"biomap_reference_ranges", t:"biomap_measurement_types",lbl:"measurement_type_id" },
+  { s:"biomap_reference_ranges", t:"biomap_units",           lbl:"unit_id" },
+
+  // programming
+  { s:"programming_feedback",    t:"programming_generated",  lbl:"program_id" },
+  { s:"programming_coach_edits", t:"programming_generated",  lbl:"program_id" },
+  { s:"member_cardio_workout_log",t:"cardio_workouts",       lbl:"workout_id" },
+
+  // CRM
+  { s:"hubspot_deals_clean",     t:"hubspot_contacts_clean", lbl:"contact_id" },
+  { s:"member_referral_credits", t:"lead_referral",          lbl:"lead_referral_id" },
+
+  // PM
+  { s:"pm_tasks",                t:"pm_projects",            lbl:"project_id" },
+  { s:"pm_tasks",                t:"pm_sub_projects",        lbl:"sub_project_id" },
+  { s:"pm_sub_projects",         t:"pm_projects",            lbl:"project_id" },
+  { s:"pm_task_collaborators",   t:"pm_tasks",               lbl:"task_id" },
+  { s:"pm_time_entries",         t:"pm_tasks",               lbl:"task_id" },
+
+  // addons
+  { s:"member_addons",           t:"membership_addons",      lbl:"addon_id" },
+];
+/* SCHEMA_DATA_END */
+
+// ============================================================
+// VISUALIZATION ENGINE
+// ============================================================
+
+const W = window.innerWidth;
+const H = window.innerHeight;
+
+// Compute degree map
+const degMap = {};
+RAW_LINKS.forEach(l => {
+  if (l.s !== l.t) { // skip self-refs for degree
+    degMap[l.s] = (degMap[l.s] || 0) + 1;
+    degMap[l.t] = (degMap[l.t] || 0) + 1;
+  }
+});
+
+// Build nodes & links
+const nodes = RAW_NODES.map(n => ({
+  ...n,
+  degree: degMap[n.id] || 0,
+  r: n.hub ? Math.max(10, Math.min(20, 8 + (degMap[n.id]||0)*0.55))
+           : Math.max(5, Math.min(13, 4 + (degMap[n.id]||0)*0.55)),
+}));
+const nodeById = {};
+nodes.forEach(n => nodeById[n.id] = n);
+
+const links = RAW_LINKS.map(l => ({ source: l.s, target: l.t, lbl: l.lbl }));
+
+// Update stats
+document.getElementById('sv-tables').textContent = nodes.length;
+document.getElementById('sv-links').textContent = links.length;
+
+// Domain ring positions
+const domKeys = Object.keys(DOMAINS);
+const domCenters = {};
+domKeys.forEach((k, i) => {
+  const angle = (i / domKeys.length) * 2 * Math.PI - Math.PI/2;
+  domCenters[k] = {
+    x: W/2 + Math.cos(angle) * W * 0.3,
+    y: H/2 + Math.sin(angle) * H * 0.28,
+  };
+});
+
+// ——— SVG Setup ———
+const svg = d3.select("#graph");
+
+// Defs: glow filters
+const defs = svg.select("defs");
+domKeys.forEach(k => {
+  const f = defs.append("filter").attr("id", `glow-${k}`)
+    .attr("x","-60%").attr("y","-60%").attr("width","220%").attr("height","220%");
+  f.append("feGaussianBlur").attr("stdDeviation","4").attr("result","b");
+  const m = f.append("feMerge");
+  m.append("feMergeNode").attr("in","b");
+  m.append("feMergeNode").attr("in","SourceGraphic");
+});
+// Subtle outer glow for hubs
+defs.append("filter").attr("id","glow-hub")
+  .attr("x","-80%").attr("y","-80%").attr("width","260%").attr("height","260%")
+  .append("feGaussianBlur").attr("stdDeviation","7").attr("result","b");
+d3.select("#glow-hub").append("feMerge")
+  .call(m => { m.append("feMergeNode").attr("in","b"); m.append("feMergeNode").attr("in","SourceGraphic"); });
+
+// Zoom & pan
+const zoom = d3.zoom().scaleExtent([0.15, 5])
+  .on("zoom", ({transform}) => g.attr("transform", transform));
+svg.call(zoom);
+
+const g = svg.append("g");
+
+// ——— Force Simulation ———
+const sim = d3.forceSimulation(nodes)
+  .force("link", d3.forceLink(links).id(d => d.id)
+    .distance(d => {
+      const sn = nodeById[typeof d.source==='object'?d.source.id:d.source];
+      const tn = nodeById[typeof d.target==='object'?d.target.id:d.target];
+      return sn && tn && sn.domain === tn.domain ? 65 : 120;
+    })
+    .strength(0.35)
+  )
+  .force("charge", d3.forceManyBody().strength(-260))
+  .force("collide", d3.forceCollide().radius(d => d.r + 7).strength(0.85))
+  .force("clusterX", d3.forceX(d => domCenters[d.domain]?.x ?? W/2).strength(0.09))
+  .force("clusterY", d3.forceY(d => domCenters[d.domain]?.y ?? H/2).strength(0.09))
+  .force("center", d3.forceCenter(W/2, H/2).strength(0.04));
+
+// ——— Render Layers ———
+
+// Hull layer (domain blobs)
+const hullLayer = g.append("g").attr("class","hulls");
+const hullPaths = hullLayer.selectAll(".hull-path")
+  .data(domKeys).join("path").attr("class","hull-path")
+  .attr("fill", k => DOMAINS[k].color + "0e")
+  .attr("stroke", k => DOMAINS[k].color + "22")
+  .attr("stroke-width", 2)
+  .attr("stroke-linejoin","round");
+
+// Domain label layer
+const domLabelLayer = g.append("g").attr("class","dom-labels");
+const domLabels = domLabelLayer.selectAll(".dom-label")
+  .data(domKeys).join("text").attr("class","dom-label")
+  .attr("text-anchor","middle")
+  .attr("fill", k => DOMAINS[k].color + "55")
+  .attr("font-size","10")
+  .attr("font-family","-apple-system, sans-serif")
+  .attr("font-weight","700")
+  .attr("letter-spacing","0.1em")
+  .attr("pointer-events","none")
+  .text(k => DOMAINS[k].label.toUpperCase());
+
+// Link layer
+const linkLayer = g.append("g").attr("class","links");
+const linkSel = linkLayer.selectAll(".link-line")
+  .data(links).join("line").attr("class","link-line")
+  .attr("stroke", d => {
+    const sn = nodeById[typeof d.source==='object'?d.source.id:d.source];
+    return sn ? DOMAINS[sn.domain]?.color + "28" : "#ffffff18";
+  })
+  .attr("stroke-width", 1);
+
+// Node layer
+const nodeLayer = g.append("g").attr("class","nodes");
+const nodeGs = nodeLayer.selectAll(".ng")
+  .data(nodes).join("g").attr("class","ng")
+  .call(d3.drag()
+    .on("start", (e,d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+    .on("drag",  (e,d) => { d.fx=e.x; d.fy=e.y; })
+    .on("end",   (e,d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+  );
+
+// Outer halo ring
+nodeGs.append("circle")
+  .attr("r", d => d.r + 5)
+  .attr("fill","none")
+  .attr("stroke", d => DOMAINS[d.domain]?.color + "20")
+  .attr("stroke-width", 1)
+  .attr("pointer-events","none");
+
+// Hub pulse ring (for hub nodes)
+nodeGs.filter(d => d.hub).append("circle")
+  .attr("r", d => d.r + 10)
+  .attr("fill","none")
+  .attr("stroke", d => DOMAINS[d.domain]?.color + "12")
+  .attr("stroke-width", 1.5)
+  .attr("pointer-events","none")
+  .append("animate")
+    .attr("attributeName","r")
+    .attr("values", d => `${d.r+10};${d.r+18};${d.r+10}`)
+    .attr("dur","3s")
+    .attr("repeatCount","indefinite");
+
+// Main node circle
+nodeGs.append("circle")
+  .attr("class","node-circle")
+  .attr("r", d => d.r)
+  .attr("fill", d => d.hub ? DOMAINS[d.domain]?.color : DOMAINS[d.domain]?.color + "60")
+  .attr("stroke", d => DOMAINS[d.domain]?.color)
+  .attr("stroke-width", d => d.hub ? 1.5 : 0.8)
+  .attr("filter", d => d.hub ? `url(#glow-${d.domain})` : null)
+  .style("cursor","pointer");
+
+// Label
+nodeGs.append("text")
+  .attr("class","node-label")
+  .attr("dy", d => d.r + 10)
+  .attr("text-anchor","middle")
+  .text(d => d.id.length > 24 ? d.id.slice(0,22)+"…" : d.id);
+
+// ——— Tick ———
+sim.on("tick", () => {
+  linkSel
+    .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+
+  nodeGs.attr("transform", d => `translate(${d.x},${d.y})`);
+
+  // Domain hulls
+  const dmapPts = {};
+  nodes.forEach(n => {
+    if (!dmapPts[n.domain]) dmapPts[n.domain] = [];
+    dmapPts[n.domain].push([n.x, n.y]);
+  });
+
+  hullPaths.attr("d", k => {
+    const pts = dmapPts[k];
+    if (!pts || pts.length < 3) return null;
+    const h = d3.polygonHull(pts);
+    if (!h) return null;
+    const cx = d3.mean(h, p=>p[0]), cy = d3.mean(h, p=>p[1]);
+    const exp = h.map(p => [cx + (p[0]-cx)*1.35, cy + (p[1]-cy)*1.35]);
+    return "M"+exp.join("L")+"Z";
+  });
+
+  // Domain label positions (centroid of domain nodes)
+  domLabels.attr("x", k => {
+    const pts = dmapPts[k];
+    return pts ? d3.mean(pts, p=>p[0]) : domCenters[k]?.x ?? W/2;
+  }).attr("y", k => {
+    const pts = dmapPts[k];
+    if (!pts) return domCenters[k]?.y ?? H/2;
+    const minY = d3.min(pts, p=>p[1]);
+    return minY - 18;
+  });
+});
+
+// ——— Interaction ———
+let selectedId = null;
+let hiddenDomains = new Set();
+
+function getNeighbors(id) {
+  const s = new Set([id]);
+  links.forEach(l => {
+    const sid = typeof l.source==='object'?l.source.id:l.source;
+    const tid = typeof l.target==='object'?l.target.id:l.target;
+    if (sid===id) s.add(tid);
+    if (tid===id) s.add(sid);
+  });
+  return s;
+}
+
+function getConnectedLinks(id) {
+  return links.filter(l => {
+    const sid = typeof l.source==='object'?l.source.id:l.source;
+    const tid = typeof l.target==='object'?l.target.id:l.target;
+    return sid===id || tid===id;
+  });
+}
+
+function highlight(id) {
+  selectedId = id;
+  const neighbors = getNeighbors(id);
+  const connLinks = getConnectedLinks(id);
+  const connLinkSet = new Set(connLinks);
+
+  nodeGs.select(".node-circle")
+    .attr("opacity", d => hiddenDomains.has(d.domain) ? 0 : (id ? (neighbors.has(d.id) ? 1 : 0.08) : 1));
+  nodeGs.select(".node-label")
+    .attr("opacity", d => hiddenDomains.has(d.domain) ? 0 : (id ? (neighbors.has(d.id) ? 0.9 : 0.04) : 0.5));
+  nodeGs.selectAll("circle:not(.node-circle)")
+    .attr("opacity", d => hiddenDomains.has(d.domain) ? 0 : (id ? (neighbors.has(d.id) ? 1 : 0.03) : 1));
+
+  linkSel.attr("opacity", d => id ? (connLinkSet.has(d) ? 1 : 0.04) : 1)
+    .attr("stroke", d => {
+      if (!id) {
+        const sn = nodeById[typeof d.source==='object'?d.source.id:d.source];
+        return sn ? DOMAINS[sn.domain]?.color + "28" : "#ffffff18";
+      }
+      return connLinkSet.has(d) ? DOMAINS[nodeById[typeof d.source==='object'?d.source.id:d.source]?.domain]?.color + "cc" : "#ffffff06";
+    })
+    .attr("stroke-width", d => connLinkSet.has(d) && id ? 1.5 : 1)
+    .classed("link-active", d => connLinkSet.has(d) && !!id);
+
+  hullPaths.attr("opacity", k => hiddenDomains.has(k) ? 0 : (id ? 0.4 : 1));
+
+  if (id) showInfoPanel(id, neighbors, connLinks);
+  else document.getElementById('info-panel').classList.remove('vis');
+}
+
+function showInfoPanel(id, neighbors, connLinks) {
+  const n = nodeById[id];
+  if (!n) return;
+  const panel = document.getElementById('info-panel');
+  const dom = DOMAINS[n.domain];
+
+  document.getElementById('itag').textContent = dom.label;
+  document.getElementById('itag').style.background = dom.color + "25";
+  document.getElementById('itag').style.color = dom.color;
+  document.getElementById('ititle').textContent = n.id;
+  document.getElementById('idesc').textContent = n.desc;
+  document.getElementById('istat').textContent = `${n.degree} connections · ${n.hub ? 'Hub table' : 'Table'}`;
+
+  const list = document.getElementById('icon-list');
+  list.innerHTML = '';
+  connLinks.slice(0, 10).forEach(l => {
+    const sid = typeof l.source==='object'?l.source.id:l.source;
+    const tid = typeof l.target==='object'?l.target.id:l.target;
+    const otherId = sid===id ? tid : sid;
+    const dir = sid===id ? '→' : '←';
+    const div = document.createElement('div');
+    div.className = 'icon-item';
+    div.innerHTML = `<span style="color:${DOMAINS[nodeById[otherId]?.domain]?.color||'#fff'}88">${dir}</span> ${otherId} <span>${l.lbl}</span>`;
+    div.style.cursor = 'pointer';
+    div.onclick = () => highlight(otherId);
+    list.appendChild(div);
+  });
+  if (connLinks.length > 10) {
+    const more = document.createElement('div');
+    more.className = 'icon-item';
+    more.style.color = 'rgba(255,255,255,0.25)';
+    more.textContent = `…and ${connLinks.length-10} more`;
+    list.appendChild(more);
+  }
+
+  panel.classList.add('vis');
+}
+
+// Node click
+nodeGs.on("click", (e, d) => {
+  e.stopPropagation();
+  if (selectedId === d.id) { selectedId=null; highlight(null); }
+  else highlight(d.id);
+});
+
+// Tooltip on hover
+const tooltip = document.getElementById('tooltip');
+nodeGs.on("mouseover", (e, d) => {
+  if (selectedId) return;
+  tooltip.innerHTML = `<strong style="color:${DOMAINS[d.domain]?.color}">${d.id}</strong><br>${d.desc}`;
+  tooltip.style.display = 'block';
+}).on("mousemove", e => {
+  tooltip.style.left = (e.pageX + 14)+'px';
+  tooltip.style.top = (e.pageY - 10)+'px';
+}).on("mouseout", () => { tooltip.style.display='none'; });
+
+// Click on background = deselect
+svg.on("click", () => { selectedId=null; highlight(null); });
+
+// Info panel close
+document.getElementById('info-close').onclick = () => { selectedId=null; highlight(null); };
+
+// ——— Legend ———
+const legendGrid = document.getElementById('legend-grid');
+domKeys.forEach(k => {
+  const dom = DOMAINS[k];
+  const row = document.createElement('div');
+  row.className = 'legend-row';
+  row.innerHTML = `<div class="ldot" style="background:${dom.color}"></div>${dom.label}`;
+  row.title = `Toggle ${dom.label}`;
+  row.onclick = () => {
+    if (hiddenDomains.has(k)) {
+      hiddenDomains.delete(k);
+      row.classList.remove('dimmed');
+    } else {
+      hiddenDomains.add(k);
+      row.classList.add('dimmed');
+    }
+    applyDomainVisibility();
+  };
+  legendGrid.appendChild(row);
+});
+
+function applyDomainVisibility() {
+  nodeGs.attr("opacity", d => hiddenDomains.has(d.domain) ? 0 : 1)
+        .attr("pointer-events", d => hiddenDomains.has(d.domain) ? "none" : "all");
+  linkSel.attr("opacity", d => {
+    const sn = nodeById[typeof d.source==='object'?d.source.id:d.source];
+    const tn = nodeById[typeof d.target==='object'?d.target.id:d.target];
+    return (hiddenDomains.has(sn?.domain) || hiddenDomains.has(tn?.domain)) ? 0 : 1;
+  });
+  hullPaths.attr("opacity", k => hiddenDomains.has(k) ? 0 : 1);
+}
+
+// ——— Search ———
+document.getElementById('search').addEventListener('input', e => {
+  const q = e.target.value.toLowerCase().trim();
+  if (!q) { highlight(null); return; }
+  const match = nodes.find(n => n.id.toLowerCase().includes(q));
+  if (match) {
+    highlight(match.id);
+    // Pan to node
+    const t = d3.zoomTransform(svg.node());
+    svg.transition().duration(600).call(
+      zoom.transform,
+      d3.zoomIdentity.translate(W/2 - t.k*match.x, H/2 - t.k*match.y).scale(t.k)
+    );
+  }
+});
+
+// ——— Reset ———
+document.getElementById('reset-btn').onclick = () => {
+  selectedId = null; highlight(null);
+  hiddenDomains.clear();
+  document.querySelectorAll('.legend-row').forEach(r => r.classList.remove('dimmed'));
+  applyDomainVisibility();
+  svg.transition().duration(700).call(zoom.transform, d3.zoomIdentity.translate(0,0).scale(1));
+  document.getElementById('search').value = '';
+};
+
+// ——— Expand ———
+let expanded = false;
+document.getElementById('expand-btn').onclick = () => {
+  expanded = !expanded;
+  document.getElementById('expand-btn').textContent = expanded ? '⊖ Collapse' : '⊕ Expand All';
+  sim.force("clusterX", d3.forceX(d => domCenters[d.domain]?.x ?? W/2).strength(expanded ? 0.02 : 0.09));
+  sim.force("clusterY", d3.forceY(d => domCenters[d.domain]?.y ?? H/2).strength(expanded ? 0.02 : 0.09));
+  sim.force("charge", d3.forceManyBody().strength(expanded ? -480 : -260));
+  sim.alpha(0.5).restart();
+};
+
+// ——— Resize ———
+window.addEventListener('resize', () => {
+  const W2=window.innerWidth, H2=window.innerHeight;
+  sim.force("center", d3.forceCenter(W2/2, H2/2));
+  sim.alpha(0.2).restart();
+});
+</script>
+</body>
+</html>
