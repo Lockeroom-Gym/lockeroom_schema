@@ -6,7 +6,7 @@ Auto-updated daily via GitHub Actions.
 ## How It Works
 
 `update-schema.js` queries the Supabase Management API for all tables, columns,
-and foreign key relationships, then injects the data into `schema-neural-map.html`.
+and foreign key relationships, then injects the data into `index.html` (site root for Vercel).
 
 Tables are auto-classified into domains (Members, Staff, Scheduling, Finance,
 Health, CRM, Programming, Coach Ops, PM, System) and rendered as an interactive
@@ -45,5 +45,13 @@ cp .env.example .env
 # Fill in SUPABASE_PROJECT_REF and SUPABASE_ACCESS_TOKEN
 npm install
 npm run update-schema
-open schema-neural-map.html
+open index.html
 ```
+
+## Vercel
+
+This repo is a **static** site: the diagram is a single HTML file at the repository root.
+
+- **Root URL** (`/`) is served from `index.html` — required for Vercel’s default static hosting.
+- Import the GitHub project in Vercel with **Framework Preset: Other**, or leave auto-detect; `vercel.json` disables install/build so deploys stay fast.
+- Connect the production domain (e.g. `lockeroom-schema.vercel.app`) to this project and redeploy after pushing.

@@ -4,7 +4,7 @@
   "description": "Schema diagram + auto-update tools for Locker Room Gym database",
   "scripts": {
     "update-schema": "node update-schema.js",
-    "open-diagram": "open schema-neural-map.html"
+    "open-diagram": "open index.html"
   },
   "dependencies": {
     "dotenv": "^16.0.0"

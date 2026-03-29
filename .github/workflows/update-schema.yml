@@ -40,7 +40,7 @@ jobs:
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet schema-neural-map.html; then
+          if git diff --quiet index.html; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "ℹ️  No schema changes detected"
           else
@@ -53,6 +53,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add schema-neural-map.html
+          git add index.html
           git commit -m "chore: update schema map $(date +%Y-%m-%d)"
           git push

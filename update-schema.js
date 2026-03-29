@@ -3,7 +3,7 @@
  * update-schema.js
  * ─────────────────────────────────────────────────────────────
  * Queries your Supabase database and regenerates the
- * SCHEMA_DATA block inside schema-neural-map.html.
+ * SCHEMA_DATA block inside index.html (served as site root on Vercel).
  *
  * SETUP (one-time):
  *   1. npm install node-fetch   (or use Node 18+ which has built-in fetch)
@@ -35,7 +35,7 @@ require('dotenv').config(); // optional — works if dotenv is installed
 
 const PROJECT_REF   = process.env.SUPABASE_PROJECT_REF  || 'dvrhazdtbsttzduaedzu';
 const ACCESS_TOKEN  = process.env.SUPABASE_ACCESS_TOKEN  || '';
-const DIAGRAM_FILE  = path.join(__dirname, 'schema-neural-map.html');
+const DIAGRAM_FILE  = path.join(__dirname, 'index.html');
 
 if (!ACCESS_TOKEN) {
   console.error('❌  SUPABASE_ACCESS_TOKEN env var is required.');
@@ -222,7 +222,7 @@ async function main() {
 
   fs.writeFileSync(DIAGRAM_FILE, finalHtml, 'utf-8');
 
-  console.log(`✅  Updated schema-neural-map.html`);
+  console.log(`✅  Updated index.html`);
   console.log(`   ${nodes.length} tables · ${links.length} relationships · ${generated}`);
   console.log(`\n   Open: ${DIAGRAM_FILE}`);
 }
