@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign In — Locker Room Gym</title>
+<style>
+  :root {
+    --bg: #03030a;
+    --card-bg: rgba(10, 10, 24, 0.96);
+    --border: rgba(255,255,255,0.08);
+    --text: #e2e8f0;
+    --text-muted: rgba(255,255,255,0.4);
+    --accent: #00E5FF;
+    --accent-dim: rgba(0, 229, 255, 0.12);
+    --input-bg: rgba(255,255,255,0.04);
+    --input-border: rgba(255,255,255,0.1);
+    --input-focus: rgba(0, 229, 255, 0.35);
+    --error-bg: rgba(255, 80, 80, 0.1);
+    --error-border: rgba(255, 80, 80, 0.35);
+    --error-text: #ff6b6b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 50% at 30% 20%, rgba(0,229,255,0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 70% 80%, rgba(100,255,218,0.03) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Loading state */
+  #auth-check {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: var(--text-muted);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+  .check-spinner {
+    width: 24px; height: 24px;
+    border: 2px solid rgba(255,255,255,0.08);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  /* Card */
+  #login-wrap {
+    display: none;
+    width: 100%;
+    max-width: 500px;
+    padding: 24px;
+  }
+
+  .login-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px 44px;
+    backdrop-filter: blur(24px);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
+  }
+
+  /* Header */
+  .card-header {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .brand-icon {
+    width: 60px; height: 60px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0, 229, 255, 0.25);
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 20px;
+    color: var(--accent);
+    box-shadow: 0 0 24px rgba(0,229,255,0.08);
+  }
+  .card-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+  .card-header p {
+    font-size: 13px;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+    font-family: -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+
+  /* Google button */
+  .google-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 10px;
+    padding: 14px 20px;
+    color: rgba(255,255,255,0.9);
+    font-size: 14px;
+    font-family: -apple-system, sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    letter-spacing: 0.01em;
+    margin-bottom: 24px;
+  }
+  .google-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.25);
+    transform: translateY(-1px);
+  }
+  .google-btn:active:not(:disabled) { transform: translateY(0); }
+  .google-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Divider */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .divider-line { flex: 1; height: 1px; background: var(--border); }
+  .divider-text {
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 0.08em;
+    font-family: -apple-system, sans-serif;
+  }
+
+  /* Form */
+  .form-group { margin-bottom: 18px; }
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+    font-family: -apple-system, sans-serif;
+    font-weight: 500;
+    margin-bottom: 8px;
+    letter-spacing: 0.01em;
+  }
+  .form-group input {
+    width: 100%;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 9px;
+    padding: 13px 16px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: -apple-system, sans-serif;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .form-group input:focus {
+    border-color: var(--input-focus);
+    background: rgba(0, 229, 255, 0.03);
+    box-shadow: 0 0 0 3px rgba(0,229,255,0.08);
+  }
+  .form-group input::placeholder { color: rgba(255,255,255,0.18); }
+  .form-group input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Error */
+  #error-msg {
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    border-radius: 9px;
+    padding: 12px 15px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    color: var(--error-text);
+    font-family: -apple-system, sans-serif;
+    display: none;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.5;
+  }
+  #error-msg.visible { display: flex; }
+
+  /* Submit button */
+  .submit-btn {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    padding: 14px 20px;
+    color: #000;
+    font-size: 14px;
+    font-family: -apple-system, sans-serif;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 6px;
+    box-shadow: 0 4px 20px rgba(0,229,255,0.2);
+  }
+  .submit-btn:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(0,229,255,0.3);
+  }
+  .submit-btn:active:not(:disabled) { transform: translateY(0); }
+  .submit-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+  .btn-spinner {
+    width: 15px; height: 15px;
+    border: 2px solid rgba(0,0,0,0.2);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  .btn-spinner-light {
+    width: 15px; height: 15px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: rgba(255,255,255,0.85);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .card-footer {
+    text-align: center;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    font-size: 11px;
+    color: rgba(255,255,255,0.15);
+    letter-spacing: 0.08em;
+    font-family: -apple-system, sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<div id="auth-check">
+  <div class="check-spinner"></div>
+  CHECKING SESSION
+</div>
+
+<div id="login-wrap">
+  <div class="login-card">
+
+    <div class="card-header">
+      <div class="brand-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <h1>LOCKER ROOM GYM</h1>
+      <p>Sign in to access the staff portal</p>
+    </div>
+
+    <!-- Google OAuth — mirrors src/lib/auth.js signInWithGoogle() -->
+    <button class="google-btn" id="google-btn" type="button">
+      <svg width="16" height="16" viewBox="0 0 48 48">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.73 1.22 9.24 3.63l6.9-6.9C35.95 2.47 30.42 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.04 6.24C12.57 13.41 17.88 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.14-3.09-.4-4.55H24v9.02h12.94c-.56 3-2.25 5.55-4.8 7.25l7.36 5.7c4.3-3.97 6.78-9.82 6.78-17.42z"/>
+        <path fill="#FBBC05" d="M10.6 28.54A14.5 14.5 0 0 1 9.5 24c0-1.57.28-3.09.78-4.54l-8.04-6.24A24 24 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78l8.04-6.24z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.92-2.13 15.9-5.8l-7.36-5.7c-2.05 1.38-4.68 2.2-8.54 2.2-6.12 0-11.43-3.91-13.4-9.46l-8.04 6.24C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <div class="divider">
+      <div class="divider-line"></div>
+      <span class="divider-text">OR</span>
+      <div class="divider-line"></div>
+    </div>
+
+    <!-- Email / Password — mirrors src/lib/auth.js signIn() -->
+    <form id="login-form" novalidate>
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email"
+               placeholder="you@example.com" autocomplete="email" required />
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password"
+               placeholder="••••••••" autocomplete="current-password" required />
+      </div>
+
+      <div id="error-msg" role="alert">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span id="error-text"></span>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submit-btn">Sign In</button>
+    </form>
+
+    <div class="card-footer">LOCKER ROOM GYM — STAFF PORTAL</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+// ─── Supabase client (mirrors src/lib/supabase.js) ───────────────────────────
+const SUPABASE_URL      = 'https://dvrhazdtbsttzduaedzu.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2cmhhemR0YnN0dHpkdWFlZHp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3ODg4MDUsImV4cCI6MjA2MTM2NDgwNX0.1kBxXBwIfZtRhevxI_dLZPHfLXDLBTyy5YmUMS6OCDY';
+const { createClient } = window.supabase;
+const sbClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const authCheck  = document.getElementById('auth-check');
+const loginWrap  = document.getElementById('login-wrap');
+const loginForm  = document.getElementById('login-form');
+const emailInput = document.getElementById('email');
+const passInput  = document.getElementById('password');
+const submitBtn  = document.getElementById('submit-btn');
+const googleBtn  = document.getElementById('google-btn');
+const errorMsg   = document.getElementById('error-msg');
+const errorText  = document.getElementById('error-text');
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function showError(msg) {
+  errorText.textContent = msg;
+  errorMsg.classList.add('visible');
+}
+function clearError() {
+  errorMsg.classList.remove('visible');
+  errorText.textContent = '';
+}
+function setLoading(on) {
+  submitBtn.disabled  = on;
+  googleBtn.disabled  = on;
+  emailInput.disabled = on;
+  passInput.disabled  = on;
+  submitBtn.innerHTML = on
+    ? '<div class="btn-spinner"></div> Signing in…'
+    : 'Sign In';
+}
+
+// ─── syncUserWithDatabase — ported from src/lib/auth.js ──────────────────────
+// After login, ensures the authenticated user exists in staff_database.
+// Matches by auth_id first, then by personal_email, inserts if neither found.
+async function syncUserWithDatabase() {
+  try {
+    const { data: userData, error: userError } = await sbClient.auth.getUser();
+    if (userError || !userData?.user?.id) return;
+
+    const user = userData.user;
+
+    // 1. Already linked by auth_id — nothing to do
+    const { data: byAuthId } = await sbClient
+      .from('staff_database')
+      .select('*')
+      .eq('auth_id', user.id)
+      .maybeSingle();
+    if (byAuthId) return;
+
+    // 2. Try matching by personal_email
+    const normalizedEmail = user.email?.trim().toLowerCase() ?? null;
+    if (normalizedEmail) {
+      const { data: byEmail } = await sbClient
+        .from('staff_database')
+        .select('*')
+        .eq('personal_email', normalizedEmail)
+        .maybeSingle();
+
+      if (byEmail) {
+        // Skip if row already has a different auth_id
+        if (byEmail.auth_id && byEmail.auth_id !== user.id) return;
+        if (byEmail.auth_id === user.id) return;
+
+        // Link existing row to this auth user
+        await sbClient
+          .from('staff_database')
+          .update({ auth_id: user.id })
+          .eq('personal_email', normalizedEmail);
+        return;
+      }
+    }
+
+    // 3. No match — insert a new staff row
+    const fullName = user.user_metadata?.full_name || '';
+    const [firstToken = '', ...rest] = fullName.trim().split(/\s+/).filter(Boolean);
+    await sbClient.from('staff_database').insert({
+      auth_id:        user.id,
+      personal_email: normalizedEmail,
+      first_name:     firstToken || null,
+      last_name:      rest.length ? rest.join(' ') : null,
+      mobile_number:  null,
+    });
+  } catch (err) {
+    console.error('syncUserWithDatabase error:', err);
+  }
+}
+
+// ─── Check existing session (mirrors src/components/LoginPage.jsx useEffect) ──
+(async () => {
+  try {
+    const { data: { session } } = await sbClient.auth.getSession();
+    if (session) {
+      window.location.replace('/');
+      return;
+    }
+  } catch (_) { /* network error — fall through to show form */ }
+
+  authCheck.style.display = 'none';
+  loginWrap.style.display = 'block';
+})();
+
+// ─── Email / Password login — mirrors src/lib/auth.js signIn() ───────────────
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearError();
+
+  const email    = emailInput.value.trim();
+  const password = passInput.value;
+  if (!email || !password) { showError('Please enter your email and password.'); return; }
+
+  setLoading(true);
+
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+  if (error) { setLoading(false); showError(error.message); return; }
+
+  // Fetch staff profile after sign-in (mirrors signIn() in auth.js)
+  await syncUserWithDatabase();
+
+  setLoading(false);
+  window.location.replace('/');
+});
+
+// ─── Google OAuth — mirrors src/lib/auth.js signInWithGoogle() ───────────────
+googleBtn.addEventListener('click', async () => {
+  clearError();
+  googleBtn.disabled = true;
+  googleBtn.innerHTML = '<div class="btn-spinner-light"></div> Redirecting to Google…';
+
+  const { error } = await sbClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + '/' },
+  });
+
+  if (error) {
+    googleBtn.disabled = false;
+    googleBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 48 48">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.73 1.22 9.24 3.63l6.9-6.9C35.95 2.47 30.42 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.04 6.24C12.57 13.41 17.88 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.14-3.09-.4-4.55H24v9.02h12.94c-.56 3-2.25 5.55-4.8 7.25l7.36 5.7c4.3-3.97 6.78-9.82 6.78-17.42z"/>
+        <path fill="#FBBC05" d="M10.6 28.54A14.5 14.5 0 0 1 9.5 24c0-1.57.28-3.09.78-4.54l-8.04-6.24A24 24 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78l8.04-6.24z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.92-2.13 15.9-5.8l-7.36-5.7c-2.05 1.38-4.68 2.2-8.54 2.2-6.12 0-11.43-3.91-13.4-9.46l-8.04 6.24C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      Continue with Google`;
+    showError(error.message);
+  }
+  // On success, browser is already redirecting — no further action needed
+});
+</script>
+</body>
+</html>

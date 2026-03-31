@@ -22,6 +22,22 @@
   svg { width: 100%; height: 100%; display: block; }
 
   /* Header */
+  /* Auth loading overlay */
+  #auth-overlay {
+    position: fixed; inset: 0; background: #03030a;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999; flex-direction: column; gap: 14px;
+    color: rgba(255,255,255,0.3); font-size: 11px; letter-spacing: 0.1em;
+  }
+  #auth-overlay .ov-spinner {
+    width: 24px; height: 24px;
+    border: 2px solid rgba(255,255,255,0.07);
+    border-top-color: #00E5FF;
+    border-radius: 50%;
+    animation: ov-spin 0.8s linear infinite;
+  }
+  @keyframes ov-spin { to { transform: rotate(360deg); } }
+
   #header {
     position: absolute; top: 0; left: 0; right: 0;
     padding: 14px 20px;
@@ -31,6 +47,31 @@
   .header-title { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.08em; }
   .header-sub { font-size: 9px; color: rgba(255,255,255,0.3); letter-spacing: 0.14em; margin-top: 2px; }
   #header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  #welcome-msg {
+    display: flex; align-items: center; gap: 8px;
+    font-family: -apple-system, sans-serif;
+  }
+  #welcome-avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(0,229,255,0.15);
+    border: 1px solid rgba(0,229,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #00E5FF;
+    flex-shrink: 0; text-transform: uppercase; line-height: 1;
+  }
+  #welcome-text {
+    font-size: 12px; color: rgba(255,255,255,0.7);
+    letter-spacing: 0.01em;
+  }
+  #welcome-text strong { color: #fff; font-weight: 600; }
+  #signout-btn {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 6px; padding: 6px 11px; color: rgba(255,255,255,0.45);
+    font-size: 11px; cursor: pointer; font-family: -apple-system, sans-serif;
+    transition: all 0.15s; display: flex; align-items: center; gap: 5px;
+    letter-spacing: 0.01em; font-weight: 500;
+  }
+  #signout-btn:hover { background: rgba(255,80,80,0.1); border-color: rgba(255,80,80,0.25); color: #ff8080; }
   #search {
     background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
     border-radius: 6px; padding: 6px 12px; color: #fff; font-size: 11px;
@@ -122,6 +163,13 @@
 </style>
 </head>
 <body>
+
+<!-- Auth loading overlay — hidden once session is confirmed -->
+<div id="auth-overlay">
+  <div class="ov-spinner"></div>
+  AUTHENTICATING
+</div>
+
 <div id="header">
   <div>
     <div class="header-title">⬡ LOCKER ROOM GYM</div>
@@ -129,9 +177,21 @@
   </div>
   <span id="gen-date">Generated: 2026-03-31</span>
   <div id="header-right">
+    <div id="welcome-msg" style="display:none">
+      <div id="welcome-avatar"></div>
+      <span id="welcome-text"></span>
+    </div>
     <input type="text" id="search" placeholder="Search tables…" />
     <button class="ctrl-btn" id="reset-btn">↺ Reset</button>
     <button class="ctrl-btn" id="expand-btn">⊕ Expand All</button>
+    <button id="signout-btn" title="Sign out">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      Sign Out
+    </button>
   </div>
 </div>
 
@@ -172,8 +232,129 @@
 
 <div id="tooltip"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script>
+// ============================================================
+// AUTH GUARD — ported from src/lib/supabase.js + src/lib/auth.js
+// ============================================================
+(function () {
+  const SUPABASE_URL      = 'https://dvrhazdtbsttzduaedzu.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2cmhhemR0YnN0dHpkdWFlZHp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3ODg4MDUsImV4cCI6MjA2MTM2NDgwNX0.1kBxXBwIfZtRhevxI_dLZPHfLXDLBTyy5YmUMS6OCDY';
+
+  const { createClient } = window.supabase;
+  window._supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // ── syncUserWithDatabase — mirrors src/lib/auth.js ─────────────────────────
+  // Called after Google OAuth redirect lands here, ensuring the user is linked
+  // in staff_database (by auth_id or personal_email match, else inserted).
+  async function syncUserWithDatabase() {
+    try {
+      const { data: userData, error: userError } = await window._supabase.auth.getUser();
+      if (userError || !userData?.user?.id) return;
+
+      const user = userData.user;
+
+      // 1. Already linked by auth_id
+      const { data: byAuthId } = await window._supabase
+        .from('staff_database').select('*').eq('auth_id', user.id).maybeSingle();
+      if (byAuthId) return;
+
+      // 2. Try matching by personal_email
+      const normalizedEmail = user.email?.trim().toLowerCase() ?? null;
+      if (normalizedEmail) {
+        const { data: byEmail } = await window._supabase
+          .from('staff_database').select('*').eq('personal_email', normalizedEmail).maybeSingle();
+
+        if (byEmail) {
+          if (byEmail.auth_id && byEmail.auth_id !== user.id) return;
+          if (byEmail.auth_id === user.id) return;
+          await window._supabase
+            .from('staff_database').update({ auth_id: user.id }).eq('personal_email', normalizedEmail);
+          return;
+        }
+      }
+
+      // 3. No match — insert new staff row
+      const fullName = user.user_metadata?.full_name || '';
+      const [firstToken = '', ...rest] = fullName.trim().split(/\s+/).filter(Boolean);
+      await window._supabase.from('staff_database').insert({
+        auth_id:        user.id,
+        personal_email: normalizedEmail,
+        first_name:     firstToken || null,
+        last_name:      rest.length ? rest.join(' ') : null,
+        mobile_number:  null,
+      });
+    } catch (err) {
+      console.error('syncUserWithDatabase error:', err);
+    }
+  }
+
+  // ── fetchStaffDetailsByAuthId — mirrors src/lib/auth.js ────────────────────
+  async function fetchStaffDetailsByAuthId(authId) {
+    const { data, error } = await window._supabase
+      .from('staff_database').select('*').eq('auth_id', authId).maybeSingle();
+    return { staffDetails: data ?? null, error };
+  }
+
+  // ── initAuth — mirrors src/components/ProtectedRoute.jsx logic ─────────────
+  async function initAuth() {
+    const { data: { session } } = await window._supabase.auth.getSession();
+
+    if (!session) {
+      window.location.replace('/login.html');
+      return;
+    }
+
+    const user = session.user;
+
+    // Run sync in case this is a fresh Google OAuth callback
+    await syncUserWithDatabase();
+
+    // Resolve display name from staff_database, then OAuth metadata, then email
+    let displayName = user.user_metadata?.full_name
+                   || user.user_metadata?.name
+                   || user.email;
+
+    const { staffDetails } = await fetchStaffDetailsByAuthId(user.id);
+    if (staffDetails) {
+      const name = staffDetails.name
+                || staffDetails.full_name
+                || (staffDetails.first_name
+                    ? [staffDetails.first_name, staffDetails.last_name].filter(Boolean).join(' ')
+                    : null);
+      if (name) displayName = name;
+    }
+
+    // Populate welcome message — avatar initial + name
+    const welcomeMsg    = document.getElementById('welcome-msg');
+    const welcomeAvatar = document.getElementById('welcome-avatar');
+    const welcomeText   = document.getElementById('welcome-text');
+    if (welcomeMsg && welcomeAvatar && welcomeText) {
+      welcomeAvatar.textContent = displayName.charAt(0);
+      welcomeText.innerHTML = `Welcome, <strong>${displayName}</strong>`;
+      welcomeMsg.style.display = 'flex';
+    }
+
+    // Remove loading overlay — reveal the app
+    const overlay = document.getElementById('auth-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  // ── signOut — mirrors src/lib/auth.js signOut() ─────────────────────────────
+  window._handleSignOut = async function () {
+    await window._supabase.auth.signOut();
+    window.location.replace('/login.html');
+  };
+
+  // Redirect on session expiry / explicit sign-out from another tab
+  window._supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') window.location.replace('/login.html');
+  });
+
+  initAuth();
+})();
+
 // ============================================================
 // SCHEMA DATA  — run `node update-schema.js` to regenerate
 // ============================================================
@@ -926,6 +1107,11 @@ window.addEventListener('resize', () => {
   const W2=window.innerWidth, H2=window.innerHeight;
   sim.force("center", d3.forceCenter(W2/2, H2/2));
   sim.alpha(0.2).restart();
+});
+
+// ——— Sign-out button ———
+document.getElementById('signout-btn').addEventListener('click', () => {
+  window._handleSignOut();
 });
 </script>
 </body>
