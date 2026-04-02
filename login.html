@@ -327,6 +327,7 @@
   </div>
 </div>
 
+<script src="/config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 // ─── Supabase client (mirrors src/lib/supabase.js) ───────────────────────────
@@ -462,9 +463,10 @@ googleBtn.addEventListener('click', async () => {
   googleBtn.disabled = true;
   googleBtn.innerHTML = '<div class="btn-spinner-light"></div> Redirecting to Google…';
 
+  const appUrl = window.__config?.APP_URL || window.location.origin;
   const { error } = await sbClient.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: window.location.origin + '/' },
+    options: { redirectTo: `${appUrl}/` },
   });
 
   if (error) {
