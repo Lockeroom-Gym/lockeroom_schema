@@ -232,6 +232,7 @@
 
 <div id="tooltip"></div>
 
+<script src="/config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script>
@@ -239,11 +240,9 @@
 // AUTH GUARD — ported from src/lib/supabase.js + src/lib/auth.js
 // ============================================================
 (function () {
-  const SUPABASE_URL      = 'https://dvrhazdtbsttzduaedzu.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2cmhhemR0YnN0dHpkdWFlZHp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3ODg4MDUsImV4cCI6MjA2MTM2NDgwNX0.1kBxXBwIfZtRhevxI_dLZPHfLXDLBTyy5YmUMS6OCDY';
-
+  // Credentials loaded from config.js
   const { createClient } = window.supabase;
-  window._supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  window._supabase = createClient(window.__config.SUPABASE_URL, window.__config.SUPABASE_ANON_KEY);
 
   // ── syncUserWithDatabase — mirrors src/lib/auth.js ─────────────────────────
   // Called after Google OAuth redirect lands here, ensuring the user is linked

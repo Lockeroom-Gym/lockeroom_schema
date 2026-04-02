@@ -327,13 +327,12 @@
   </div>
 </div>
 
+<script src="/config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
-// ─── Supabase client (mirrors src/lib/supabase.js) ───────────────────────────
-const SUPABASE_URL      = 'https://dvrhazdtbsttzduaedzu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2cmhhemR0YnN0dHpkdWFlZHp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU3ODg4MDUsImV4cCI6MjA2MTM2NDgwNX0.1kBxXBwIfZtRhevxI_dLZPHfLXDLBTyy5YmUMS6OCDY';
+// ─── Supabase client — credentials loaded from config.js ─────────────────────
 const { createClient } = window.supabase;
-const sbClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sbClient = createClient(window.__config.SUPABASE_URL, window.__config.SUPABASE_ANON_KEY);
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 const authCheck  = document.getElementById('auth-check');
@@ -462,9 +461,10 @@ googleBtn.addEventListener('click', async () => {
   googleBtn.disabled = true;
   googleBtn.innerHTML = '<div class="btn-spinner-light"></div> Redirecting to Google…';
 
+  const appUrl = window.__config?.APP_URL || window.location.origin;
   const { error } = await sbClient.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: window.location.origin + '/' },
+    options: { redirectTo: `${appUrl}/` },
   });
 
   if (error) {
