@@ -39,6 +39,8 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `system_config` | Session durations and contract hour baselines |
 | `membership_types` | Membership product definitions |
 | `membership_versions` | Historical pricing and policy snapshots |
+| `member_physicals_raw` | Physical assessment data — movement screen, benchmarks, focus/avoid fields. One row per assessment. |
+| `member_health_metrics` | InBody body composition scans — weight, bf, smm, inbody_score, date_created. |
 
 ---
 
@@ -79,6 +81,13 @@ Active coach = coach_id
 - **Secondary Membership:** Identified by `primary_membership_id IS NOT NULL` in `member_memberships`. The `primary_membership_id` points to the core membership.
 - **Session Credits:** To get the total session credits for a member, you must sum the `session_credits` from BOTH the primary membership and any connected secondary memberships.
 - **Session Types (Box / VO2):** To determine if a membership includes boxing or VO2, check the `membership_selected` column in the connected `member_newsale_metadata` or `member_renewal_meta` table (e.g., `ILIKE '%box%'` or `ILIKE '%VO2%'`).
+
+### Injuries, Goals, and Assessment Fields
+- `member_database.injuries` and `member_database.goals` = **canonical, up-to-date values** — use for profile display
+- `member_physicals_raw.injuries` / `.goals` = point-in-time snapshots from the assessment form — do not use as primary source
+- `member_physicals_raw.focus_program` and `.exercises_avoid` = assessment-specific programming context — no equivalent on `member_database`
+- **Assessment date:** use `submission_date WHERE source = 'form'` — rows with other source values are imports, not formal screenings
+- **Body composition:** latest `member_health_metrics` row by `date_created` desc. `smm` = skeletal muscle mass (displayed as "Muscle Mass"), `bf` = body fat %
 
 ### Financial Data
 - Revenue/package details → join to `member_newsale_metadata` or `member_renewal_meta`

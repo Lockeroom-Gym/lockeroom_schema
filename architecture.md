@@ -2,7 +2,7 @@
 
 **Database:** PostgreSQL (Supabase)
 **Project ID:** dvrhazdtbsttzduaedzu
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-08
 
 This document describes the core tables, column definitions, foreign key relationships, and business rules for the Lockeroom database. Intended for developer reference.
 
@@ -21,6 +21,7 @@ This document describes the core tables, column definitions, foreign key relatio
 9. [Membership Config](#9-membership-config)
 10. [Key Views](#10-key-views)
 11. [FK Relationship Map](#11-fk-relationship-map)
+12. [Assessments & Health Data](#12-assessments--health-data)
 
 ---
 
@@ -60,6 +61,8 @@ The single source of truth for member demographics, contact info, and primary co
 | `created_at` | timestamptz | |
 
 > **Note:** `coach_id` here is the member's default coach. The active assignment may differ at the membership level — always use `member_memberships.coach_id` and `member_memberships.handoff_coach_id` for current operational context.
+
+> **Health & goals source of truth:** `injuries` and `goals` on `member_database` are the canonical fields for a member's injury history and objectives. `member_physicals_raw` stores assessment-specific fields (`focus_program`, `exercises_avoid`) captured at each physical screening — do not conflate these with the profile-level `injuries`/`goals`.
 
 ---
 
@@ -564,6 +567,65 @@ staff_database
 membership_types
   └── id ←── membership_versions.membership_type_id
 ```
+
+---
+
+## 12. Assessments & Health Data
+
+### `member_physicals_raw`
+Stores raw physical assessment data captured at each screening (movement screen, benchmarks, health background). One row per assessment submission per member.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `submission_date` | date | Date the assessment was completed |
+| `source` | text | How the row was created — `'form'` = submitted via assessment form, other values = imported/other. **Filter `source = 'form'` when displaying the last formal assessment date.** |
+| `squat` | text | Squat ROM at hip — range value e.g. `'0-60'`, `'60-100'`, `'100+'` |
+| `hinge` | text | Hinge (bodyweight Romanian) ROM |
+| `shoulder_flexion` | text | Shoulder flexion (lying supine) ROM |
+| `toe_touch` | text | Toe touch / forward flexion ROM |
+| `grip_strength_value` | numeric | Combined grip strength (kg) |
+| `grip_strength_left` | numeric | Left hand grip (kg) |
+| `grip_strength_right` | numeric | Right hand grip (kg) |
+| `grip_strength_score` | numeric | Scored/normalised grip result |
+| `chin_hold_value` | numeric | Chin-over-bar hold duration (seconds) |
+| `chin_hold_score` | numeric | Scored chin hold result |
+| `vertical_jump_value` | numeric | Vertical jump height (cm) |
+| `vertical_jump_score` | numeric | Scored vertical jump result |
+| `rsi_value` | numeric | Reactive strength index |
+| `vo2_value` | numeric | VO2 max (mL/kg/min) |
+| `vo2_score` | numeric | Scored VO2 result |
+| `push_ups_value` | numeric | Push-up max reps |
+| `push_ups_score` | numeric | Scored push-up result |
+| `picked_cardio` | text | Cardio test selected — `'run'` or `'bike'` |
+| `bike_test_avg_watt` | numeric | Bike test average watts (when `picked_cardio = 'bike'`) |
+| `run_test_meters` | numeric | Run test distance in meters (when `picked_cardio = 'run'`) |
+| `goals` | text | Goals captured at time of assessment (snapshot) |
+| `injuries` | text | Injuries captured at time of assessment (snapshot) |
+| `focus_program` | text | Training focus for the program (e.g. strength, fat loss, athletic) — assessment-specific |
+| `exercises_avoid` | text | Exercises the member should avoid — assessment-specific |
+
+> **Source-of-truth split:** `injuries` and `goals` on this table are point-in-time snapshots from the assessment form. The canonical, up-to-date values live on `member_database.injuries` and `member_database.goals`. Use `focus_program` and `exercises_avoid` from `member_physicals_raw` for programming decisions — these fields do not exist on `member_database`.
+
+> **Usage in Programming Engine (Intake page):** Movement screen and benchmark tabs read the latest `member_physicals_raw` row (any source). The Assessment Date field displays the latest `submission_date` WHERE `source = 'form'` only.
+
+---
+
+### `member_health_metrics`
+InBody body composition scan results. One row per scan per member.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `weight` | numeric | Body weight (kg) |
+| `bf` | numeric | Body fat percentage |
+| `smm` | numeric | Skeletal muscle mass (kg) — displayed as "Muscle Mass" in the UI |
+| `inbody_score` | numeric | Overall InBody score |
+| `date_created` | timestamptz | Scan date — order DESC and take latest for current metrics |
+
+> **Display convention:** In the Programming Engine Intake page, `bf` is shown as "Body Fat %", `smm` is shown as "Muscle Mass", and `date_created` is shown as "Scan Date".
 
 ---
 
