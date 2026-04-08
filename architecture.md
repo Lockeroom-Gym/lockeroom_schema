@@ -118,6 +118,11 @@ The central table. Each row represents one membership term. A member can have mu
 - Do NOT filter by `status` — active, pending, indefinite_hold, F&F, and inactive all count
 - Exclude: `journey_stage = 'no_sale'`
 
+**Primary vs Secondary Memberships & Session Counting:**
+- A secondary membership is identified by `primary_membership_id IS NOT NULL` (it points to the parent/primary `member_memberships.id`).
+- **Total Session Credits:** When calculating a member's total allocated sessions per week, you must **sum** the `session_credits` from the primary membership's metadata AND the `session_credits` from any connected secondary memberships' metadata.
+- **Membership Types (e.g. VO2, Box):** The type of membership is stored in the `membership_selected` column within the financial metadata tables (`member_newsale_metadata` and `member_renewal_meta`). To check if a membership includes specific modalities, use an ILIKE match (e.g., `membership_selected ILIKE '%VO2%'` or `membership_selected ILIKE '%box%'`).
+
 **New sale vs. renewal:**
 - New client = row with earliest `start_date` for a `member_id`
 - Renewal = any subsequent row with a later `start_date`

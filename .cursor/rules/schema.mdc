@@ -75,6 +75,11 @@ Active coach = coach_id
 - `handoff_coach_id` = who was actually handling them at time of churn
 - Renewal points → `handoff_coach_id` if set, else `coach_id`
 
+### Primary vs Secondary Memberships & Session Counting
+- **Secondary Membership:** Identified by `primary_membership_id IS NOT NULL` in `member_memberships`. The `primary_membership_id` points to the core membership.
+- **Session Credits:** To get the total session credits for a member, you must sum the `session_credits` from BOTH the primary membership and any connected secondary memberships.
+- **Session Types (Box / VO2):** To determine if a membership includes boxing or VO2, check the `membership_selected` column in the connected `member_newsale_metadata` or `member_renewal_meta` table (e.g., `ILIKE '%box%'` or `ILIKE '%VO2%'`).
+
 ### Financial Data
 - Revenue/package details → join to `member_newsale_metadata` or `member_renewal_meta`
 - Do NOT use `member_memberships` alone for financial queries
