@@ -1,0 +1,116 @@
+---
+description: Lockeroom Supabase schema reference — auto-loaded for all queries and code in this repo
+globs:
+  - "**/*.js"
+  - "**/*.ts"
+  - "**/*.sql"
+  - "**/*.md"
+alwaysApply: true
+---
+
+# Lockeroom Database — Architecture & Business Rules
+
+This repo connects to the Lockeroom Supabase database. Always refer to `architecture.md` for the full schema reference. Below is a fast-load summary of the most critical rules.
+
+---
+
+## Database
+
+- **Provider:** Supabase (PostgreSQL)
+- **Project ID:** `dvrhazdtbsttzduaedzu`
+- **Source of truth:** `architecture.md` in this repo
+
+---
+
+## Core Tables (quick ref)
+
+| Table | Purpose |
+|-------|---------|
+| `member_database` | Member demographics and primary coach assignment |
+| `member_memberships` | One row per membership term — central operational table |
+| `member_newsale_metadata` | Financial snapshot for new sales |
+| `member_renewal_meta` | Financial snapshot for renewals |
+| `member_not_renewing` | Churn tracking — who's leaving and why |
+| `member_holds` | Membership pauses |
+| `member_daily_sessions_attended` | Actual session attendance |
+| `member_lcns` | Late cancels and no-shows |
+| `staff_database` | All staff, coaches, and roles |
+| `work_estimations` | Per-client hour allocations per role |
+| `system_config` | Session durations and contract hour baselines |
+| `membership_types` | Membership product definitions |
+| `membership_versions` | Historical pricing and policy snapshots |
+
+---
+
+## Critical Business Rules
+
+### Active Member Count
+```sql
+SELECT COUNT(DISTINCT member_id)
+FROM member_memberships
+WHERE primary_membership_id IS NULL   -- primary memberships only
+  AND CURRENT_DATE <= end_date        -- not expired (future starts count)
+  AND journey_stage != 'no_sale'      -- exclude no-sales
+-- Do NOT filter by status
+```
+
+### New Sale vs Renewal
+- **New client** = row with earliest `start_date` for a `member_id`
+- **Renewal** = any subsequent row with a later `start_date`
+
+### Active Coach Assignment
+```
+Active coach = coach_id
+  UNLESS handoff_coach_id IS NOT NULL → use handoff_coach_id
+```
+
+### renewal_lead vs coach_id Disambiguation
+> "How many renewals does [coach] have?" has TWO valid answers:
+> - Leading the renewal conversation → filter `renewal_lead`
+> - Their clients up for renewal → filter `coach_id` / `handoff_coach_id`
+> **Always clarify which before querying.**
+
+### Not-Renewing Attribution
+- `member_not_renewing.coach_id` = **always the original coach** (even after handoff)
+- `handoff_coach_id` = who was actually handling them at time of churn
+- Renewal points → `handoff_coach_id` if set, else `coach_id`
+
+### Financial Data
+- Revenue/package details → join to `member_newsale_metadata` or `member_renewal_meta`
+- Do NOT use `member_memberships` alone for financial queries
+- `base_membership_value` = core membership only (excludes add-ons)
+- `price_paid` = total paid (includes add-ons + fees)
+
+### Coach Hours — Never Hardcode
+- Per-client allocations → always query `work_estimations.per_client_allocation`
+- Session durations and FTE/PTE hours → always query `system_config.duration`
+
+---
+
+## Key Views (use these, avoid manual joins)
+
+| View | Use for |
+|------|---------|
+| `view_active_members` | Pre-filtered active members with coach info |
+| `view_member_membership_full_details` | Members + memberships + versions joined |
+| `view_active_memberships` | Active memberships with financial metadata |
+| `view_member_count_per_coach` | Per-coach counts and capacity |
+| `view_member_calls_with_status` | All calls (3-month, 9-month, renewal) with status |
+| `view_coach_session_balance_sep25` | Actual vs expected hours per coach per week |
+| `view_membership_costs` | Full cost/margin breakdown per membership |
+
+---
+
+## General Rules
+
+1. Always `COUNT(DISTINCT member_id)` — never double-count
+2. Filter `primary_membership_id IS NULL` for core member counts
+3. Do NOT filter by `status` for active counts
+4. Active = `CURRENT_DATE <= end_date` (future starts count)
+5. Exclude `test_account = true` from all reporting queries
+6. Use views where available — they handle complex joins
+7. Never hardcode values from `work_estimations` or `system_config`
+
+---
+
+**Full schema:** See `architecture.md` in this repo for complete column definitions, FK maps, and appendix rules.
