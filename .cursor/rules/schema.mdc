@@ -66,9 +66,9 @@ Active coach = coach_id
   UNLESS handoff_coach_id IS NOT NULL → use handoff_coach_id
 ```
 
-### renewal_lead vs coach_id Disambiguation
+### renewal_assignee vs coach_id Disambiguation
 > "How many renewals does [coach] have?" has TWO valid answers:
-> - Leading the renewal conversation → filter `renewal_lead`
+> - Leading the renewal conversation → filter `renewal_assignee` (column name; day-to-day role is "Renewal Lead")
 > - Their clients up for renewal → filter `coach_id` / `handoff_coach_id`
 > **Always clarify which before querying.**
 

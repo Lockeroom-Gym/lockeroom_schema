@@ -2,7 +2,7 @@
 
 **Database:** PostgreSQL (Supabase)
 **Project ID:** dvrhazdtbsttzduaedzu
-**Last updated:** 2026-04-08
+**Last updated:** 2026-04-11
 
 This document describes the core tables, column definitions, foreign key relationships, and business rules for the Lockeroom database. Intended for developer reference.
 
@@ -80,15 +80,15 @@ The central table. Each row represents one membership term. A member can have mu
 | `end_date` | date | |
 | `status` | text | Do NOT filter by status for active count — see counting rules |
 | `membership_stage` | text | e.g. `new_sale`, `renewal` |
-| `journey_stage` | USER-DEFINED (enum) | Exclude `no_sale` from all member counts |
+| `journey_stage` | USER-DEFINED (enum) | Exclude `no_sale` from all member counts. `not_renewing` = member has confirmed they will not renew — this is the only true confirmed-leaving signal. Any churn prediction or scoring system must exclude `not_renewing` rows (outcome already known). `expired` = membership has lapsed with no renewal. |
 | `gym` | text | Assigned gym location |
 | `rm` | boolean | `true` = member has a dedicated Results Manager. `false` = no-RM tier |
 | `primary_membership_id` | uuid | FK → `member_memberships.id` (self-ref). `NULL` = primary/core membership. `NOT NULL` = secondary/add-on tier |
 | `newsale_metadata` | uuid | FK → `member_newsale_metadata.id` |
 | `renewal_metadata` | uuid | FK → `member_renewal_meta.id` |
-| `pipeline_lost` | USER-DEFINED (enum) | Pipeline lost status flag |
+| `pipeline_lost` | USER-DEFINED (enum) | Manager-set early warning signal that a member may not renew. NOT a confirmed-leaving indicator. Values: `bad_churn` = manager predicts member will leave for a fixable/saveable reason. `good_churn` = manager predicts member will leave because they are relocating. `NULL` = no flag set. See business rules below. |
 | `renewal_date` | date | |
-| `membership_notes` | text | |
+| `membership_notes` | text | Free-text field written by the renewal team. Contains subjective observations, renewal conversation notes, objections raised, and next steps. Not structured — content varies. Used as qualitative context in AI-generated churn explanations. Not a scoring signal in SQL. Do not use as a confirmed-leaving indicator. |
 | `check1` | boolean | Milestone check flags |
 | `check2` | boolean | |
 | `check3` | boolean | |
@@ -102,13 +102,24 @@ The central table. Each row represents one membership term. A member can have mu
 | `handoff_coach_id` | uuid | FK → `staff_database.id`. If populated, this coach takes over the RM assignment from `coach_id` |
 | `programming_coach_id` | uuid | FK → `staff_database.id`. Writes the member's training programs. In future will likely merge with the RM role, but currently tracked separately |
 | `salesperson_id` | uuid | FK → `staff_database.id`. Person who closed the deal |
-| `renewal_lead` | uuid | FK → `staff_database.id`. The person who physically sits down and conducts the renewal conversation |
-| `revenue_team_assignee` | uuid | FK → `staff_database.id`. Handles 3-month and 9-month calls — applies to second membership or later only. Performed by the RM; requires Advanced Coach level or above |
+| `renewal_assignee` | uuid | FK → `staff_database.id`. The staff member who physically sits down and conducts the renewal conversation. Known internally as the "Renewal Lead". Populated on the vast majority of active memberships. Not the same as `revenue_team_assignee` — see disambiguation below. |
+| `revenue_team_assignee` | uuid | FK → `staff_database.id`. Handles 3-month and 9-month check-in calls. Applies to second membership or later only. Performed by the RM; requires Advanced Coach level or above. Not the same as `renewal_assignee` — `revenue_team_assignee` owns ongoing check-in calls during the membership, `renewal_assignee` owns the end-of-term renewal conversation. |
 | `nutrition_lead` | uuid | FK → `staff_database.id`. Coach responsible for nutrition support |
 
-> **Critical disambiguation — `renewal_lead` vs `coach_id`:**
+**Staff resolution rules — who to contact for a given member:**
+
+- **Active RM (coach):** `handoff_coach_id` takes priority over `coach_id`. If `handoff_coach_id IS NOT NULL`, that is the active Results Manager. Otherwise use `coach_id`. Never use both — they are mutually exclusive for the active assignment.
+- **Renewal conversation owner:** `renewal_assignee` is the staff member responsible for conducting the end-of-term renewal conversation. This may or may not be the same person as the active RM.
+- **Ongoing check-in calls:** `revenue_team_assignee` handles the 3-month and 9-month calls during the membership term. Distinct from `renewal_assignee`.
+- **Gym Manager by location:** Resolved by the `gym` column on `member_memberships`. Do not look this up via a database join — use the hardcoded mapping below:
+  - `gym = 'BLIGH'` → Levi Wheatley (Gym Manager)
+  - `gym = 'BRIDGE'` → Andy Kong (Gym Manager)
+  - `gym = 'COLLINS'` → Nick Woolward (Gym Manager)
+- The gym manager is the escalation contact for unresponsive members or critical-tier churn risk situations.
+
+> **Critical disambiguation — `renewal_assignee` vs `coach_id`:**
 > "How many renewals does [coach] have?" has two valid answers:
-> - Renewals they are **personally leading** → filter on `renewal_lead`
+> - Renewals they are **personally leading** → filter on `renewal_assignee`
 > - Renewals for **their clients** → filter on `coach_id` / `handoff_coach_id`
 > Always clarify which is meant before querying.
 
@@ -134,6 +145,15 @@ The central table. Each row represents one membership term. A member can have mu
 - Active coach = `coach_id` UNLESS `handoff_coach_id IS NOT NULL` → handoff coach takes the assignment
 - Not-renewing attribution: if a handed-off client goes to not renewing, the `member_not_renewing` record attributes to the **original `coach_id`**, not the handoff coach
 - Renewal points: awarded to `handoff_coach_id` if not null, otherwise default to `coach_id`
+
+**`pipeline_lost` — business rules:**
+
+- `pipeline_lost` is set by a manager to signal they believe a member is at risk of not renewing. It is a prediction, not a confirmation.
+- `bad_churn`: manager believes the member will leave for a reason that is fixable — disengagement, perceived lack of value, unmet goals, cost concerns, etc. These members are highest priority for save conversations. Coach outreach should be initiated immediately.
+- `good_churn`: manager believes the member will leave because they are moving out of the area. Lower save priority but a conversation is still worthwhile.
+- `pipeline_lost` IS NOT the same as confirmed leaving. A member with `pipeline_lost` set may still renew — it is an input to retention conversations, not an outcome.
+- The only confirmed-leaving signal is `journey_stage = 'not_renewing'`. This means the member has explicitly told Lockeroom they will not renew. Any system that scores, predicts, or acts on churn risk must exclude `journey_stage = 'not_renewing'` members — their outcome is already known.
+- Do not filter on `pipeline_lost` to find churned members. Filter on `journey_stage = 'not_renewing'` or `end_date < CURRENT_DATE` for actual churn.
 
 ---
 
@@ -274,6 +294,8 @@ Most accurate source of truth for actual member attendance. One row per session 
 | `remaining_visits` | text | |
 | `created_at` | timestamptz | |
 
+**Data lineage note:** `member_daily_sessions_attended` is the source of truth for all attendance-derived metrics. `member_batch_attendance` (a view) aggregates this table weekly for convenience. Any system that requires aggregate attendance signals should prefer querying `member_daily_sessions_attended` directly for accuracy and to avoid double-aggregation. The view is provided for backward compatibility with existing tooling.
+
 ### `member_lcns`
 Tracks Late Cancels and No Shows separately from attendance.
 
@@ -291,19 +313,28 @@ Tracks Late Cancels and No Shows separately from attendance.
 | `created_at` | timestamptz | |
 
 ### `member_batch_attendance`
-Rolled-up weekly attendance per member.
+Weekly attendance rollup per member. **THIS IS A VIEW** — not a base table. Rebuilt April 2026.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `id` | bigint | PK |
+| `id` | bigint | Row number (derived — not a stable PK, do not use for joins) |
 | `member_id` | uuid | FK → `member_database.id` |
-| `date` | date | Week date |
-| `sessions_attended` | integer | |
-| `booked` | integer | |
-| `late_cancel` | integer | |
-| `no_shows` | integer | |
-| `last_visit_date` | date | |
-| `created_at` | timestamptz | |
+| `member_name` | text | Denormalized |
+| `date` | date | Week start date (Monday), derived via `DATE_TRUNC('week', session_date)` |
+| `sessions_attended` | integer | Count of rows in `member_daily_sessions_attended` for this member-week |
+| `booked` | integer | Derived: `sessions_attended + late_cancel + no_shows`. No live bookings table exists — see note below |
+| `late_cancel` | integer | Sourced from `member_lcns.late_cancel`, aggregated to week |
+| `no_shows` | integer | Sourced from `member_lcns.no_show`, aggregated to week |
+| `last_visit_date` | date | `MAX(session_date)` for this member-week |
+| `created_at` | timestamptz | `MIN(created_at)` from `member_daily_sessions_attended` for this member-week |
+
+**Source tables:** `member_daily_sessions_attended` (attendance rows) + `member_lcns` (late cancel / no show rows).
+
+**Important — `booked` column:** There is no forward-looking bookings table in Supabase. `member_priority_booking` stores recurring booking templates (day-of-week patterns), not individual session-level bookings. Therefore `booked = sessions_attended + late_cancel + no_shows`. This is derived, not sourced from a live bookings feed. It is behaviourally sound for ratio calculations: "of everything they were supposed to show up for, how often did they bail?"
+
+**History:** Prior to April 2026 this was a base table populated by an external sync job. That job stopped running in August 2025, leaving the table stale (341 rows, last data July 31 2025). The table was dropped and replaced with this live view on April 11 2026. The view has identical column names and types to the original table so existing queries are unaffected.
+
+**Query note:** The view recomputes on every query from the base tables. For high-volume or repeated aggregation use cases, query `member_daily_sessions_attended` and `member_lcns` directly to avoid double-aggregation overhead.
 
 ---
 
@@ -501,6 +532,9 @@ Historical pricing and policy snapshots. Older memberships retain their original
 | `view_coach_session_expectations` | Computed expected sessions from contract hours minus role hours (planning/reference only — balance view uses logged expectations) |
 | `view_coach_session_balance_sep25` | Main balance view — actual vs expected hours per coach per week |
 | `view_staff_hours_weekly` | Supplementary hours per coach per week |
+| `member_churn_risk` | Churn prediction scores for all active members. One row per member, replaced weekly by `score_member_churn_risk()`. Columns: `risk_score` (0–100), `risk_tier` (low/medium/high/critical), `risk_factors` (jsonb), `churn_explanation` (AI-generated text), `pipeline_lost`, `predicted_outcome`, `actual_outcome` |
+| `member_churn_risk_history` | Historical archive of weekly churn scores per member. Used for trend sparklines. Appended to before each weekly scoring run |
+| `view_churn_model_accuracy` | Prediction accuracy by tier — compares `predicted_outcome` vs `actual_outcome` once renewal outcomes are recorded |
 
 ---
 
@@ -513,7 +547,7 @@ member_database
   ├── id ←── member_holds.member_id
   ├── id ←── member_daily_sessions_attended.member_id
   ├── id ←── member_lcns.member_id
-  ├── id ←── member_batch_attendance.member_id
+  ├── id ←── member_batch_attendance.member_id  [VIEW — reads from member_daily_sessions_attended]
   ├── id ←── member_programs.member_id
   ├── id ←── member_biomap.member_id
   ├── id ←── member_physicals_raw.member_id
@@ -533,7 +567,7 @@ member_memberships
   ├── handoff_coach_id ──→ staff_database.id
   ├── programming_coach_id ──→ staff_database.id
   ├── salesperson_id ──→ staff_database.id
-  ├── renewal_lead ──→ staff_database.id
+  ├── renewal_assignee ──→ staff_database.id
   ├── revenue_team_assignee ──→ staff_database.id
   └── nutrition_lead ──→ staff_database.id
 
@@ -638,3 +672,11 @@ InBody body composition scan results. One row per scan per member.
 5. **Use views where available.** `view_member_membership_full_details`, `view_active_members`, `view_member_calls_with_status` handle complex joins.
 6. **Financial data lives in metadata tables.** Join `member_memberships` → `member_newsale_metadata` or `member_renewal_meta` for pricing, package details, and margin calculations.
 7. **Coach hour config is live.** Never hardcode values from `work_estimations` or `system_config` — always query the DB.
+8. **`pipeline_lost` is a prediction, not an outcome.** Never use `pipeline_lost` to identify churned members. Use `journey_stage = 'not_renewing'` for confirmed leaving. Use `end_date < CURRENT_DATE` for expired memberships. `pipeline_lost = 'bad_churn'` means a manager has flagged the member as a saveable save-conversation priority. `pipeline_lost = 'good_churn'` means the manager expects the member to leave due to relocation.
+9. **`member_batch_attendance` is a view.** It recomputes live from `member_daily_sessions_attended` and `member_lcns`. Do not treat it as a cached or pre-aggregated table — it has no materialisation. For performance-sensitive queries over large date ranges, go to the base tables directly.
+10. **`renewal_assignee` vs `revenue_team_assignee`:** these are two different roles. `renewal_assignee` conducts the end-of-term renewal conversation. `revenue_team_assignee` handles the 3-month and 9-month check-in calls during the membership. Do not conflate them.
+11. **Confirmed-leaving indicators (in order of certainty):**
+    1. `journey_stage = 'not_renewing'` — member has told Lockeroom they are leaving. Strongest signal.
+    2. `end_date < CURRENT_DATE` AND no subsequent membership row — membership lapsed.
+    3. `member_not_renewing` table record — churn has been formally logged with reason and metadata.
+    `pipeline_lost`, `membership_notes`, and churn risk scores are predictive signals only — not confirmed outcomes.
