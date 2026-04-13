@@ -1,15 +1,14 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase)
-**Project ID:** dvrhazdtbsttzduaedzu
-**Last updated:** 2026-04-11
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-04-13
 
-This document describes the core tables, column definitions, foreign key relationships, and business rules for the Lockeroom database. Intended for developer reference.
+Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
 ---
 
 ## Table of Contents
 
+- [AI digest (read first)](#ai-digest-read-first)
 1. [Core Member Tables](#1-core-member-tables)
 2. [Membership Lifecycle](#2-membership-lifecycle)
 3. [Financial Metadata](#3-financial-metadata)
@@ -22,6 +21,23 @@ This document describes the core tables, column definitions, foreign key relatio
 10. [Key Views](#10-key-views)
 11. [FK Relationship Map](#11-fk-relationship-map)
 12. [Assessments & Health Data](#12-assessments--health-data)
+
+---
+
+## AI digest (read first)
+
+| Topic | Rule |
+|--------|------|
+| **Member spine** | `member_database` → `member_memberships` → financial rows (`member_newsale_metadata` / `member_renewal_meta` via FK on membership) |
+| **Active members** | Same filters on `member_memberships`; join `member_database` to exclude `test_account = true`; do **not** filter `status` |
+| **Active coach** | `COALESCE(handoff_coach_id, coach_id)` on `member_memberships` (handoff wins) |
+| **Renewal vs revenue role** | `renewal_assignee` = end-of-term renewal conversation; `revenue_team_assignee` = 3mo/9mo calls — different columns |
+| **Money / package** | Never infer from `member_memberships` alone — join newsale or renewal metadata |
+| **Staff spine** | `staff_database.id` referenced everywhere; org hierarchy: `direct_report` → manager’s `staff_database.id` |
+| **Staff “active”** | `staff_database.staff_status` enum: `active` \| `inactive` — filter here for current roster |
+| **Role semantics** | `role` = primary title / seniority line; `supplementary_roles` = `text[]` extra hats (non–tenure-track, operational extras) |
+| **Personality / PV** | Narrative + **`personality` text** live in **`staff_personal_vision`** (per `staff_id`), not on `staff_database`. Optional numeric **`style_*`** ints on `staff_database` are separate coaching-style dimensions |
+| **1:1 / HR notes** | Manager ↔ direct report check-ins: **`hr_direct_report`** (`manager_id`, `coach_id` = report), one row per submission (~weekly); not member data |
 
 ---
 
@@ -341,33 +357,85 @@ Weekly attendance rollup per member. **THIS IS A VIEW** — not a base table. Re
 ## 7. Staff & Scheduling
 
 ### `staff_database`
-All staff profiles — coaches, admin, leadership.
+All staff profiles — coaches, admin, leadership. **Foreign-key hub:** most `coach_id` / staff references in member and ops tables point here.
+
+**Disambiguation (often confused):**
+
+| Field | Meaning |
+|--------|---------|
+| `staff_status` | PostgreSQL enum `active_inactive`: values **`active`** \| **`inactive`**. Use for “is this person currently on staff?” |
+| `role` | Single primary job title / **seniority line** (one string) |
+| `supplementary_roles` | `text[]` — **extra hats** (e.g. project-specific or operational duties), not a separate rank ladder |
+| `direct_report` | FK → `staff_database.id` — this person’s **manager** (org line; used with `work_estimations.human_resources`) |
+
+**Coaching-style ints:** `style_relator`, `style_transformer`, `style_snc`, `style_specialist`, `style_wellness` are numeric scores on the row. **Personality / narrative text** (including free-text personality) lives in **`staff_personal_vision`**, not here.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid | PK |
-| `first_name` | text | |
-| `last_name` | text | |
+| `first_name` / `last_name` | text | |
 | `coach_name` | text | Denormalized full name |
-| `role` | text | Job title/role label |
-| `staff_status` | USER-DEFINED (enum) | Active, inactive, etc. |
-| `lockeroom_email` | text | |
-| `personal_email` | text | |
+| `dob` | date | |
+| `lockeroom_email` / `personal_email` | text | |
 | `mobile_number` | text | |
-| `home_gym` | text | Primary gym location |
+| `role` | text | Primary title / seniority |
+| `staff_status` | `active_inactive` | `active` \| `inactive` |
+| `supplementary_roles` | text[] | Non-primary roles |
+| `direct_report` | uuid | FK → `staff_database.id` (manager) |
+| `buddy_coach` | uuid | FK → `staff_database.id` |
+| `home_gym` | text | Primary gym |
+| `state` | text | e.g. NSW / VIC |
+| `employment_type` | text | Full-time / Part-time |
+| `executive` | boolean | |
 | `tod_coaching` | text | Time-of-day coaching preference/assignment |
 | `rm_ceiling` | numeric | Max RM client capacity |
-| `direct_report` | uuid | FK → `staff_database.id` (self-ref) — manager of this staff member |
-| `employment_type` | text | Full-time / Part-time |
 | `session_bracket_fk` | uuid | FK → session bracket config |
-| `supplementary_roles` | ARRAY | Additional roles beyond primary |
+| `sb_selector` / `sb_recommended` | enum | Session bracket choices |
+| `style_relator` … `style_wellness` | int | Coaching-style dimension scores |
 | `kpi` | text | |
-| `state` | text | NSW / VIC |
-| `executive` | boolean | |
-| `buddy_coach` | uuid | FK → `staff_database.id` |
-| `slack_channel_id` | text | |
-| `slack_member_id` | text | |
+| `cpr_perform` / `cpr_box` | numeric | |
+| `rgb_colour` | text | UI / display |
+| `slack_channel_id` / `slack_prg_id` / `slack_member_id` | text | Slack integration |
+| `client_drive_link` / `workbook_id` / `clientworkbook_links` / `raw_data_code` / `roles_ldp` | text | Ops / workbook links |
+| `auth_id` | uuid | Auth user link when set |
 | `updated_at` | timestamptz | |
+
+### `staff_personal_vision`
+One row per staff member (join `staff_id` → `staff_database.id`). **Personal vision / HR context:** goals, motivations, appreciation languages, work–life, and **`personality`** (free text). Updated over time; use `submission_date` / `updated_at` for “latest” semantics.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `staff_id` | uuid | FK → `staff_database.id` |
+| `staff_name` | text | Denormalized |
+| `vision_statement` | text | |
+| `personality` | text | **Personality / type narrative** |
+| `short_term_goals` / `long_term_goals` / `life_goals` | text | |
+| `exciting_future_projects` | text | |
+| `motivators` | text | |
+| `top_language_of_appreciation` / `second_language_of_appreciation` | text | |
+| `improvement_areas_6mo` / `notable_achievement_6_12mo` / `major_life_lessons` | text | |
+| `work_life_balance_rating` | numeric | |
+| `work_life_balance_definition` / `work_life_stressors` | text | |
+| `notes` | text | |
+| `submission_date` | date | |
+| `created_at` / `updated_at` | timestamptz | |
+
+### `hr_direct_report`
+**Manager ↔ direct report 1:1** submissions (not client/member data). Typically **one row per check-in cycle** (week-to-week operational cadence); filter by `manager_id`, `coach_id` (the report), or `submission_date` for history.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `manager_id` | uuid | FK → `staff_database.id` |
+| `coach_id` | uuid | FK → `staff_database.id` — the **report** (direct report) |
+| `manager_name` / `coach_name` | text | Denormalized |
+| `submission_date` | timestamptz | When filed |
+| `vibe_check` | text | |
+| `personal_notes` | text | |
+| `focus_areas` | text | |
+| `system_updates` | text | |
+| `manager_feedback` | text | |
+| `performance_rating` | numeric | |
+| `what_has_gone_wll` | text | Typo preserved — “what has gone well” |
 
 ### `staff_leave_confirmed`
 Approved leave days per staff member. Used in session balance calculations.
@@ -410,6 +478,8 @@ One-off or temporary additional hours on top of the default.
 | `created_by` | uuid | FK → `staff_database.id` |
 | `approved_at` | timestamptz | |
 | `created_at` | timestamptz | |
+
+**Other staff tables (not expanded here):** `staff_leave_requests` (leave requests → `staff_leave_confirmed`), `staff_onboarding` (per-task onboarding checklist linked to `staff_id`), `staff_anniversary` (name + `start_date` reference).
 
 ---
 
@@ -594,7 +664,11 @@ member_not_renewing
   └── renewal_metadata_id ──→ member_renewal_meta.id
 
 staff_database
-  ├── id ←── [multiple member_memberships staff columns]
+  ├── id ←── [member + ops FKs: memberships, metadata, not_renewing, lcns, …]
+  ├── id ←── staff_personal_vision.staff_id
+  ├── id ←── hr_direct_report.manager_id
+  ├── id ←── hr_direct_report.coach_id   [direct report in the dyad]
+  ├── id ←── staff_leave_confirmed.staff_id / staff_leave_requests.staff_id / staff_onboarding.staff_id / supplementary hours tables
   ├── direct_report ──→ staff_database.id   [self-ref: staff → manager]
   └── buddy_coach ──→ staff_database.id     [self-ref]
 
@@ -680,3 +754,5 @@ InBody body composition scan results. One row per scan per member.
     2. `end_date < CURRENT_DATE` AND no subsequent membership row — membership lapsed.
     3. `member_not_renewing` table record — churn has been formally logged with reason and metadata.
     `pipeline_lost`, `membership_notes`, and churn risk scores are predictive signals only — not confirmed outcomes.
+12. **Test accounts:** Exclude `member_database.test_account = true` from reporting and analytics (mirrors member-side rules).
+13. **Staff & HR:** Current roster → `staff_database.staff_status = 'active'`. **`role`** = primary title/seniority; **`supplementary_roles`** = extra non-rank duties. **`staff_personal_vision`** (join `staff_id`) holds **`personality`** and personal-vision fields. **`hr_direct_report`** = manager ↔ direct-report check-in rows (`manager_id`, `coach_id` = report), typically weekly cadence — not member data.
