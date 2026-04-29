@@ -4,6 +4,8 @@
 >
 > **Status.** Proposal — this file is documentation only. No migrations or app code are applied by committing this doc.
 >
+> **Member identity table names (production).** Use **`rls_member_accounts`** and **`rls_member_login_bindings`**. The second table is **member login bindings** (which gym `member_database` row(s) a login may use). Older drafts used `member_accounts` / `member_account_members`; if Supabase still has **`rls_member_account_members`**, rename it to **`rls_member_login_bindings`** in a migration and update policies, views, and functions that reference the old name.
+>
 > **Companion docs.**
 > - [`RLS-AND-HIERARCHY.md`](./RLS-AND-HIERARCHY.md) — full staff audit, 25-permission taxonomy, biomap lockdown SQL, Coach OS frontend map, `usePermission` / `RequirePermission` examples.
 > - [`architecture.md`](./architecture.md) — schema neural map.
@@ -112,9 +114,9 @@ pg_dump "$DATABASE_URL" -s -f "lockeroom-prod-$ts.schema.sql"
 | Track | Purpose | Canonical detail |
 |-------|---------|------------------|
 | **Staff RBAC** | Coaches/admins; permissions from `staff_roles` + `user_has_permission()` | [`RLS-AND-HIERARCHY.md`](./RLS-AND-HIERARCHY.md) |
-| **Member portal** | Members; row access scoped to **their** `member_database.id` via a **member account link** | This file, §6–§9 |
+| **Member portal** | Members; row access scoped to **their** `member_database.id` via **member login bindings** (`rls_member_login_bindings`) | This file, §6–§9 |
 
-Both tracks can share one Supabase project and one `auth.users` table. They **must not** share the same authorization helper: staff uses `staff_database.auth_id` + RBAC tables; members use `member_accounts` + link table + member RLS.
+Both tracks can share one Supabase project and one `auth.users` table. They **must not** share the same authorization helper: staff uses `staff_database.auth_id` + RBAC tables; members use **`rls_member_accounts`** + **`rls_member_login_bindings`** + member RLS.
 
 ---
 
@@ -144,7 +146,7 @@ The staff RBAC document correctly focuses on **Coach OS** and **`staff_database.
 
 ### 3.6 Dual identity: staff who are also members
 
-- The same `auth.uid()` may need **both** `staff_database` and `member_account_members` rows. Apps choose context (Coach OS vs member portal). RLS must allow staff policies and member policies to coexist without widening member access to coach data.
+- The same `auth.uid()` may need **both** `staff_database` and **`rls_member_login_bindings`** rows. Apps choose context (Coach OS vs member portal). RLS must allow staff policies and member policies to coexist without widening member access to coach data.
 
 ### 3.7 Service role remains bypass
 
@@ -200,12 +202,12 @@ Implementation tasks remain in **`coach_os/coachOS`** (frontend + `supabase/migr
 
 ### 6.2 Identity model
 
-**Tables (proposed names — adjust to taste):**
+**Tables (production names in Supabase):**
 
 | Table | Purpose |
 |-------|---------|
-| `member_accounts` | One row per Supabase Auth user that is allowed to use the member portal (`auth_user_id uuid PRIMARY KEY` referencing `auth.users(id)`). |
-| `member_account_members` | Many-to-many: which `member_database.id` rows this login may access (`auth_user_id`, `member_id`, optional `relationship`, `created_at`, `verified_at`). |
+| `rls_member_accounts` | One row per Supabase Auth user that is allowed to use the member portal (`auth_user_id uuid PRIMARY KEY` referencing `auth.users(id)`). |
+| `rls_member_login_bindings` | **Member login bindings:** which `member_database.id` row(s) this login may access (`auth_user_id`, `member_id`, `is_primary`, `created_at`, `verified_at`). |
 
 v1 can enforce **at most one** `member_id` per `auth_user_id` via a partial unique index; keep the M:N shape for **guardian / family** later.
 
@@ -214,10 +216,10 @@ v1 can enforce **at most one** `member_id` per `auth_user_id` via a partial uniq
 | Function | Purpose |
 |----------|---------|
 | `current_member_ids()` | Returns set of `member_id` values linked to `auth.uid()`. |
-| `is_member_portal_user()` | True if a `member_accounts` row exists for `auth.uid()`. |
+| `is_member_portal_user()` | True if a `rls_member_accounts` row exists for `auth.uid()`. |
 | `user_linked_to_member(mid uuid)` | True if `mid` is in `current_member_ids()`. |
 
-Implement as `STABLE` SQL or `SECURITY DEFINER` with **fixed `search_path`** and minimal grants. Prefer `SECURITY INVOKER` policies that inline `member_id IN (SELECT … FROM member_account_members WHERE auth_user_id = auth.uid())` if you want to avoid extra functions.
+Implement as `STABLE` SQL or `SECURITY DEFINER` with **fixed `search_path`** and minimal grants. Prefer `SECURITY INVOKER` policies that inline `member_id IN (SELECT … FROM rls_member_login_bindings WHERE auth_user_id = auth.uid())` if you want to avoid extra functions.
 
 ### 6.4 Member capability slugs (v1 read + reserved writes)
 
@@ -267,15 +269,18 @@ Block or omit entirely:
 
 ```sql
 -- Link Supabase Auth users to the member portal identity.
-CREATE TABLE public.member_accounts (
+-- Production names: rls_member_accounts, rls_member_login_bindings.
+-- Skip CREATE if tables already exist; use migrations to rename legacy rls_member_account_members → rls_member_login_bindings if needed.
+
+CREATE TABLE public.rls_member_accounts (
   auth_user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE public.member_account_members (
-  auth_user_id uuid NOT NULL REFERENCES public.member_accounts (auth_user_id) ON DELETE CASCADE,
+CREATE TABLE public.rls_member_login_bindings (
+  auth_user_id uuid NOT NULL REFERENCES public.rls_member_accounts (auth_user_id) ON DELETE CASCADE,
   member_id uuid NOT NULL REFERENCES public.member_database (id) ON DELETE CASCADE,
   is_primary boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -283,11 +288,11 @@ CREATE TABLE public.member_account_members (
   PRIMARY KEY (auth_user_id, member_id)
 );
 
-CREATE INDEX idx_member_account_members_member ON public.member_account_members (member_id);
+CREATE INDEX idx_rls_member_login_bindings_member ON public.rls_member_login_bindings (member_id);
 
 -- v1: optional — enforce single-member links per login
-CREATE UNIQUE INDEX uq_member_account_members_one_member_v1
-  ON public.member_account_members (auth_user_id)
+CREATE UNIQUE INDEX uq_rls_member_login_bindings_one_member_v1
+  ON public.rls_member_login_bindings (auth_user_id)
   WHERE true; -- drop this index later if you allow multiple members per login
 ```
 
@@ -298,12 +303,15 @@ CREATE OR REPLACE FUNCTION public.current_member_ids()
 RETURNS SETOF uuid
 LANGUAGE sql
 STABLE
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public
 AS $$
-  SELECT m.member_id
-  FROM public.member_account_members m
-  WHERE m.auth_user_id = auth.uid();
+  SELECT mlb.member_id
+  FROM public.rls_member_login_bindings mlb
+  JOIN public.rls_member_accounts ma ON ma.auth_user_id = mlb.auth_user_id
+  WHERE mlb.auth_user_id = auth.uid()
+    AND ma.status = 'active'
+    AND mlb.verified_at IS NOT NULL;
 $$;
 
 REVOKE ALL ON FUNCTION public.current_member_ids() FROM PUBLIC;
@@ -359,7 +367,7 @@ Repeat the same `USING (member_id IN (SELECT current_member_ids()))` pattern for
 
 **Preferred flow (your choice): hybrid**
 
-1. **Invite-first:** staff sends magic link / invite from a **server-side** path (Edge Function or backend) that creates `auth.users` and `member_accounts` + `member_account_members` with `verified_at` set when appropriate.
+1. **Invite-first:** staff sends magic link / invite from a **server-side** path (Edge Function or backend) that creates `auth.users` and `rls_member_accounts` + `rls_member_login_bindings` with `verified_at` set when appropriate.
 2. **Guarded self-signup:** allow sign-up only when **`auth.users.email` matches `member_database.email`** (normalized) for exactly one active member, then create link rows in a **SECURITY DEFINER** RPC after email verification.
 3. **Audit:** log every link creation (table `member_account_link_audit` optional) — who, when, which `member_id`.
 
@@ -385,8 +393,8 @@ Never auto-link on fuzzy name match.
 After `signIn`:
 
 1. Session exists.
-2. Row exists in `member_accounts`.
-3. At least one `member_account_members` row.
+2. Row exists in `rls_member_accounts`.
+3. At least one `rls_member_login_bindings` row.
 4. If user is staff-only, show “no member access” — do not crash.
 
 ---
@@ -396,7 +404,7 @@ After `signIn`:
 1. **Phase 0** — Backups, PITR, `pg_dump`, staging restore rehearsal (§1).
 2. **Staff RBAC** — Tables, seed, `user_has_permission`, migrate Coach OS to `usePermission` per [`RLS-AND-HIERARCHY.md`](./RLS-AND-HIERARCHY.md).
 3. **Biomap lockdown** — As per sibling doc §7 (after staff can still operate in staging).
-4. **Member identity tables** — `member_accounts`, `member_account_members`, helpers.
+4. **Member identity tables** — `rls_member_accounts`, `rls_member_login_bindings`, helpers.
 5. **Portal views + RLS** — Read-only SELECT policies; `security_invoker` views.
 6. **Member app v1** — Read-only UI against portal views only.
 7. **Production cutover** — Limited invite cohort; monitor logs for RLS errors.
