@@ -128,7 +128,46 @@ Snapshot functions include:
 - `run_correction_recompute_and_snapshot_for_week(p_any_date)`
 - `run_correction_recompute_and_snapshot_range(p_from, p_to)`
 
-These upsert snapshot rows from `view_session_balance_adjusted_25` or, in the staff/week correction function, from `view_coach_session_balance_sep25`.
+**What each path reads:**
+
+- **`run_correction_coach_weekly_snapshot_for_week(p_any_date)`** — Upserts snapshot rows for **every coach-week** returned by `view_session_balance_adjusted_25` for that Monday. That is **not** limited to the staff member you edited.
+- **`run_correction_recompute_and_snapshot_for_staff_week(p_staff_id, p_week_start)`** — Upserts **only** `(staff_id, week_start)` from `view_coach_session_balance_sep25`. Prefer this as the **default** after correcting a single coach so other coaches snapshots are untouched for that week. It aligns stored snapshot columns with Sep25 semantics for that one coach.
+
+## Preferred default snapshot refresh after per-coach fixes
+
+Use:
+
+```sql
+select run_correction_recompute_and_snapshot_for_staff_week('STAFF_ID'::uuid, date 'YYYY-MM-DD');
+```
+
+Use any date that falls inside the target week — the function Monday-normalizes internally.
+
+Reserve **`run_correction_coach_weekly_snapshot_for_week`** for **full-week** reconciliation when you intentionally want **all** coaches recomputed from `view_session_balance_adjusted_25` or after global expectation refreshes.
+
+## Zeroing balance for specific weeks (expectation-aligned actuals)
+
+When the user wants **`hours_balance_adjusted = 0`** for certain weeks **while keeping reported `actual_hours` unchanged** (for example “true up” weeks where you accept actuals as ground truth), treat **`session_expectation` in `coach_session_expectation_log`** as the adjustment lever so `expected_hours_adjusted` matches `actual_hours` after rounding.
+
+In `view_coach_session_balance_sep25`, for a given week:
+
+`expected_hours_adjusted = round(greatest(session_expectation / 5.0 * (business_days_this_week - leave_weekdays), 0) * get_perform_hours(), 2)`
+
+Solve for `session_expectation` so that expression equals `actual_hours` (subject to `round`). In the common case of **five working weekdays and no leave**, `(business_days_this_week - leave_weekdays) / 5 = 1`, so:
+
+`session_expectation = actual_hours / get_perform_hours()` (as `numeric`, keep full precision)
+
+More generally:
+
+`session_expectation = actual_hours / (get_perform_hours() * ((business_days_this_week - leave_weekdays)::numeric / 5.0))`
+
+Use **`actual_hours` from `view_coach_session_balance_sep25` or `coach_weekly_hours_snapshot`** after actuals are correct — not from `coach_session_actual` unless you have verified the snapshot matches raw weighting.
+
+**Caveats**
+
+- Role-hour columns on the same log row (`results_manager_hours`, `total_hours`, etc.) may no longer match a workload-derived story; document the reason in your change note.
+- The next run of `upsert_coach_expectations_from_workload` for overlapping weeks may **overwrite** these manual `session_expectation` values — prefer scheduling manual weeks outside bulk upsert windows or re-apply after upserts.
+- After updating the log, refresh the stored snapshot for **that coach only** with `run_correction_recompute_and_snapshot_for_staff_week`.
 
 ## Investigation Checklist
 
@@ -233,7 +272,8 @@ Raw actual rows exist but `session_name` does not match any duration config:
 
 Snapshot is stale but computed view is correct:
 
-- Rerun `run_correction_coach_weekly_snapshot_for_week(...)` for the affected week.
+- For **one coach:** `run_correction_recompute_and_snapshot_for_staff_week(staff_id, week_hint_date)`.
+- For **everyone in that week:** `run_correction_coach_weekly_snapshot_for_week(...)`.
 
 One-off reconciliation is needed:
 

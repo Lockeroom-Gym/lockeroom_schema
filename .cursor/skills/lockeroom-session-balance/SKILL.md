@@ -19,8 +19,10 @@ Before querying or changing data, read `reference.md`.
    - `coach_session_actual` for raw session rows.
 3. For anomalies, investigate read-only first and identify which layer is wrong.
 4. Do not directly edit `coach_weekly_hours_snapshot.actual_hours` unless the user explicitly approves a one-off derived-data correction.
-5. Prefer repairing raw actual rows or adding an audited adjustment path, then recomputing the snapshot.
-6. Verify the final result in `view_coach_session_balance_sep25`.
+5. Prefer repairing raw actual rows or adding an audited adjustment path, then refreshing snapshot rows.
+6. Default snapshot refresh after a **single-coach** fix is `run_correction_recompute_and_snapshot_for_staff_week(...)`. Avoid `run_correction_coach_weekly_snapshot_for_week` unless you intentionally want **all** coaches rebuilt for that Monday from `view_session_balance_adjusted_25`.
+7. To intentionally **zero** `hours_balance_adjusted` for selected weeks while keeping `actual_hours` as reported, tune `coach_session_expectation_log.session_expectation` so `expected_hours_adjusted` rounds to actual (see `reference.md`). Then run `run_correction_recompute_and_snapshot_for_staff_week` for that coach/week.
+8. Verify the final result in `view_coach_session_balance_sep25`.
 
 ## Correction Safety
 
