@@ -624,7 +624,7 @@ member_database
   ├── id ←── member_health_metrics.member_id
   ├── id ←── member_health_activity_daily.member_id
   ├── id ←── member_health_workouts.member_id
-  ├── id ←── member_external_health_connections.member_id
+  ├── id ←── member_health_connections.member_id
   └── id ←── member_coach_notes.member_id
 
 member_memberships
@@ -724,63 +724,65 @@ Stores raw physical assessment data captured at each screening (movement screen,
 ---
 
 ### `member_health_metrics`
-Body composition measurements (InBody scans and equivalent ingest from app or wearable pipelines). One row per measurement event per member. This table is the **source of truth** for height/weight/body-composition time series used in programming and reporting—not profile demographics.
+InBody and equivalent body composition measurements. One row per scan/measurement per member. **Source of truth** for body-composition time series for programming and reporting (not profile demographics).
+
+Live column names (do not duplicate with alternate spellings in migrations):
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid | PK |
 | `member_id` | uuid | FK → `member_database.id` |
-| `source` | text | Origin of the row. Intended default at DB level: `'inbody'`. Other examples: `'app'` (member-entered), `'terra'` (wearable/API normalised from Terra), `'withings'`, imports. Free-text extensible. |
-| `height_cm` | numeric | Height (cm) at measurement time |
-| `weight` | numeric | Total body weight (kg) at measurement time |
-| `bf` | numeric | Body fat percentage |
-| `body_fat_mass_kg` | numeric | Body fat mass (kg) |
-| `fat_free_mass_kg` | numeric | Fat-free mass (kg) |
-| `smm` | numeric | Skeletal muscle mass (kg) — displayed as "Muscle Mass" in the UI |
-| `bmc_kg` | numeric | Bone mineral content / bone mass (kg). Some vendors report grams; normalise to kg on ingest |
-| `visceral_fat_level` | numeric | Visceral fat level (device-specific scale) |
-| `age_at_measurement` | int | Age reported by the device or scan at measurement time—not a substitute for `member_database.dob` |
-| `gender_at_measurement` | text | Optional snapshot at scan/import only. **Canonical gender for the member** remains `member_database.gender` (or whichever demographic column the app uses for profile) |
-| `bmr_kcal` | numeric | Basal metabolic rate (kcal/day) |
-| `tbw_kg` | numeric | Total body water (kg), optional |
-| `tbw_pct` | numeric | Total body water (%), optional |
-| `inbody_score` | numeric | Overall InBody score (when source is InBody or mapped equivalent) |
-| `date_created` | timestamptz | Measurement timestamp — order `DESC` and take latest for “current” body composition unless filtering by `source` |
+| `member_name` | text | Optional denormalised label |
+| `source` | text | Origin of row — default `'inbody'` when migrated; also `app`, `terra`, etc. |
+| `height` | numeric | Height |
+| `weight` | numeric | Body weight (kg) |
+| `bf` | numeric | Body fat % |
+| `bfm` | numeric | Body fat mass |
+| `ffm` | numeric | Fat-free mass |
+| `smm` | numeric | Skeletal muscle mass — "Muscle Mass" in UI |
+| `bone_mineral_content` | numeric | Bone mineral content |
+| `visceral_fat_level` | numeric | Visceral fat level |
+| `age` | int | Age at scan / measurement (snapshot; profile age from `member_database.dob`) |
+| `gender` | enum/`gender` | Scan-time gender field on this table; **canonical member gender** for profile remains `member_database.gender` |
+| `tbw` | numeric | Total body water |
+| `bmr` | numeric | BMR |
+| `inbody_score` | int | InBody score |
+| `raw_payload` | jsonb | Raw ingest payload |
+| `date_created` | timestamptz | Measurement time — latest row = current metrics unless filtered by `source` |
 
-> **Display convention:** In the Programming Engine Intake page, `bf` is shown as "Body Fat %", `smm` is shown as "Muscle Mass", and `date_created` is shown as "Scan Date".
+> **Display:** `bf` as "Body Fat %", `smm` as "Muscle Mass", `date_created` as "Scan Date".
 
-> **Latest row rule:** Default “current metrics” = latest row by `date_created` DESC for the member. When comparing sources (e.g. InBody vs bathroom scale), filter by `source` or aggregate explicitly—do not assume a single provider.
-
-> **Production parity:** Migrations may add columns incrementally; until then, some columns may be null or absent in the live database. Treat this section as the target contract for ingest and migrations.
+> **Latest row:** Default current body composition = latest `date_created` DESC per member; filter by `source` when comparing providers.
 
 ---
 
 ### `member_health_activity_daily`
-Aggregated **daily** movement and energy summary per member (steps, distance, floors, calories, simple heart-rate summaries, daily scores). One row per member per **calendar day** per logical source (and optionally per `provider` when splitting Terra vendors).
+Aggregated movement/energy summary per member per **calendar day** (steps, optional distance/calories/HR summaries). **Not** structured workouts — use `member_health_workouts` or existing cardio/VO2 tables as appropriate.
 
-Do **not** store structured workout sessions here—use `member_health_workouts`. This separation keeps step counts and “whole day” wearables data distinct from discrete cardio/strength sessions (TeamBuilder, future in-app logging, Terra `activity`).
+**Step semantics:** Rows from wearables use `input_kind = vendor_daily` (true day total). Rows from `member_checkins.daily_steps` use `input_kind = manual_checkin_weekly_avg` — that field is a **self-reported weekly average**, subjective; surface distinctly in UI. Do **not** merge with `biomap_responses.step_count` for this pipeline.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid | PK |
 | `member_id` | uuid | FK → `member_database.id` |
-| `activity_date` | date | Local calendar date for the summary; define timezone policy per ingestion (document in ETL) |
-| `steps` | numeric | Step count for the day |
+| `activity_date` | date | Calendar date for the row |
+| `steps` | numeric | Day total when `vendor_daily`; weekly average figure when `manual_checkin_weekly_avg` |
 | `distance_meters` | numeric | Optional |
 | `floors_climbed` | numeric | Optional |
-| `active_calories` | numeric | Optional (net activity / active energy) |
+| `active_calories` | numeric | Optional |
 | `total_burned_calories` | numeric | Optional |
 | `resting_hr_bpm` | numeric | Optional |
-| `avg_hr_bpm` | numeric | Optional daily average |
-| `activity_score` | numeric | Optional (e.g. vendor daily score) |
+| `avg_hr_bpm` | numeric | Optional |
+| `activity_score` | numeric | Optional |
 | `recovery_score` | numeric | Optional |
 | `readiness_score` | numeric | Optional |
-| `source` | text | e.g. `terra`, `app`, internal aggregator |
-| `provider` | text | When via Terra, vendor string (e.g. `GOOGLE`, `APPLE`, Garmin-related codes as Terra exposes) |
-| `external_synced_at` | timestamptz | When the row was last confirmed from the vendor pipeline |
+| `input_kind` | text | `vendor_daily` \| `manual_checkin_weekly_avg` \| `dummy` |
+| `source` | text | e.g. `member_checkin`, `terra` |
+| `provider` | text | Vendor when applicable |
+| `external_synced_at` | timestamptz | Optional |
 | `created_at` | timestamptz | Row created in Lockeroom |
 
-> **Deduping:** Recommend unique constraint on `(member_id, activity_date, source, coalesce(provider, ''))` once providers are stable.
+> **Deduping:** Unique on `(member_id, activity_date, source, input_kind, coalesce(provider,''))`.
 
 ---
 
@@ -807,6 +809,12 @@ Discrete **workout** sessions (cardio, strength, sport, etc.), regardless of ori
 
 > **Future detail tables:** Sets/reps, GPS polylines, lap splits, per-second HR streams—add child tables later; keep this row as the summary anchor.
 
+### Internal VO2 max (cardio testing)
+
+- **Raw input:** `member_cardio_workout_log` (`log_date`, `distance_m`, `avg_watts`, `max_watts`, etc.).
+- **Computed:** `view_cardio_vo2_scores` — use **`vo2_score`**. Run distance uses `distance_m`; bike/watts path uses **`avg_watts`** (exposed as `average_watts` in the view), with latest **`member_health_metrics.weight`** and `system_config` row where `match_pattern = 'VO2'` (`mercy_multiplier`).
+- **Terra / wearables:** May supply VO2 elsewhere later; **authoritative Lockeroom test result** remains this internal view unless product decides otherwise.
+
 ---
 
 ### External health connections & Terra API (ingestion)
@@ -815,7 +823,7 @@ Terra provides normalised **Daily**, **Activity** (workout), **Body**, **Sleep**
 
 **Principles:** store **raw** vendor payloads first, then normalise into member tables. Terra adds fields over time—raw JSON preserves forward compatibility.
 
-#### `member_external_health_connections`
+#### `member_health_connections`
 Maps a Lockeroom member to a vendor account (Terra or other).
 
 | Column | Type | Notes |
@@ -837,7 +845,7 @@ Append-only (or idempotent upsert) store for webhook bodies before normalisation
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid | PK |
-| `connection_id` | uuid | Optional FK → `member_external_health_connections.id` |
+| `connection_id` | uuid | Optional FK → `member_health_connections.id` |
 | `vendor_user_id` | text | Terra user id if connection row not yet linked |
 | `event_type` | text | e.g. `daily`, `activity`, `body`, `sleep` |
 | `payload` | jsonb | Full JSON; include headers/metadata if useful for debugging |
@@ -852,7 +860,7 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 | Terra-style payload | Target |
 |---------------------|--------|
 | Body / `MeasurementDataSample` style measurements | `member_health_metrics` (set `source` appropriately, map units) |
-| Daily summary (steps, day HR summaries, scores) | `member_health_activity_daily` |
+| Daily summary (steps, day HR summaries, scores) | `member_health_activity_daily` (`input_kind = vendor_daily`) |
 | Activity / workout session | `member_health_workouts` |
 | Sleep | Future `member_health_sleep_sessions` (document when implemented—not required for this revision) |
 | High-frequency samples (HR streams, GPS points) | Future child tables; keep raw in `terra_events_raw` until needed |
