@@ -233,7 +233,7 @@ Implement as `STABLE` SQL or `SECURITY DEFINER` with **fixed `search_path`** and
 | `view_own_schedule` | Sessions relevant to member |
 | `view_own_attendance` | Attendance summaries |
 | `view_own_biomap` | BioMap results safe for member (subset of `member_biomap_*`) |
-| `view_own_health_metrics` | InBody / health metrics as appropriate |
+| `view_own_health_metrics` | Body composition (`member_health_metrics`) and related health views as appropriate — see `architecture.md` §12 |
 | `view_own_assessments` | Physicals / assessments as appropriate |
 
 **Reserved for later (do not enable in v1 UI):**

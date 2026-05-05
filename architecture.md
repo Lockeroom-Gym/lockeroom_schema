@@ -622,6 +622,9 @@ member_database
   ├── id ←── member_biomap.member_id
   ├── id ←── member_physicals_raw.member_id
   ├── id ←── member_health_metrics.member_id
+  ├── id ←── member_health_activity_daily.member_id
+  ├── id ←── member_health_workouts.member_id
+  ├── id ←── member_external_health_connections.member_id
   └── id ←── member_coach_notes.member_id
 
 member_memberships
@@ -721,19 +724,138 @@ Stores raw physical assessment data captured at each screening (movement screen,
 ---
 
 ### `member_health_metrics`
-InBody body composition scan results. One row per scan per member.
+Body composition measurements (InBody scans and equivalent ingest from app or wearable pipelines). One row per measurement event per member. This table is the **source of truth** for height/weight/body-composition time series used in programming and reporting—not profile demographics.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid | PK |
 | `member_id` | uuid | FK → `member_database.id` |
-| `weight` | numeric | Body weight (kg) |
+| `source` | text | Origin of the row. Intended default at DB level: `'inbody'`. Other examples: `'app'` (member-entered), `'terra'` (wearable/API normalised from Terra), `'withings'`, imports. Free-text extensible. |
+| `height_cm` | numeric | Height (cm) at measurement time |
+| `weight` | numeric | Total body weight (kg) at measurement time |
 | `bf` | numeric | Body fat percentage |
+| `body_fat_mass_kg` | numeric | Body fat mass (kg) |
+| `fat_free_mass_kg` | numeric | Fat-free mass (kg) |
 | `smm` | numeric | Skeletal muscle mass (kg) — displayed as "Muscle Mass" in the UI |
-| `inbody_score` | numeric | Overall InBody score |
-| `date_created` | timestamptz | Scan date — order DESC and take latest for current metrics |
+| `bmc_kg` | numeric | Bone mineral content / bone mass (kg). Some vendors report grams; normalise to kg on ingest |
+| `visceral_fat_level` | numeric | Visceral fat level (device-specific scale) |
+| `age_at_measurement` | int | Age reported by the device or scan at measurement time—not a substitute for `member_database.dob` |
+| `gender_at_measurement` | text | Optional snapshot at scan/import only. **Canonical gender for the member** remains `member_database.gender` (or whichever demographic column the app uses for profile) |
+| `bmr_kcal` | numeric | Basal metabolic rate (kcal/day) |
+| `tbw_kg` | numeric | Total body water (kg), optional |
+| `tbw_pct` | numeric | Total body water (%), optional |
+| `inbody_score` | numeric | Overall InBody score (when source is InBody or mapped equivalent) |
+| `date_created` | timestamptz | Measurement timestamp — order `DESC` and take latest for “current” body composition unless filtering by `source` |
 
 > **Display convention:** In the Programming Engine Intake page, `bf` is shown as "Body Fat %", `smm` is shown as "Muscle Mass", and `date_created` is shown as "Scan Date".
+
+> **Latest row rule:** Default “current metrics” = latest row by `date_created` DESC for the member. When comparing sources (e.g. InBody vs bathroom scale), filter by `source` or aggregate explicitly—do not assume a single provider.
+
+> **Production parity:** Migrations may add columns incrementally; until then, some columns may be null or absent in the live database. Treat this section as the target contract for ingest and migrations.
+
+---
+
+### `member_health_activity_daily`
+Aggregated **daily** movement and energy summary per member (steps, distance, floors, calories, simple heart-rate summaries, daily scores). One row per member per **calendar day** per logical source (and optionally per `provider` when splitting Terra vendors).
+
+Do **not** store structured workout sessions here—use `member_health_workouts`. This separation keeps step counts and “whole day” wearables data distinct from discrete cardio/strength sessions (TeamBuilder, future in-app logging, Terra `activity`).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `activity_date` | date | Local calendar date for the summary; define timezone policy per ingestion (document in ETL) |
+| `steps` | numeric | Step count for the day |
+| `distance_meters` | numeric | Optional |
+| `floors_climbed` | numeric | Optional |
+| `active_calories` | numeric | Optional (net activity / active energy) |
+| `total_burned_calories` | numeric | Optional |
+| `resting_hr_bpm` | numeric | Optional |
+| `avg_hr_bpm` | numeric | Optional daily average |
+| `activity_score` | numeric | Optional (e.g. vendor daily score) |
+| `recovery_score` | numeric | Optional |
+| `readiness_score` | numeric | Optional |
+| `source` | text | e.g. `terra`, `app`, internal aggregator |
+| `provider` | text | When via Terra, vendor string (e.g. `GOOGLE`, `APPLE`, Garmin-related codes as Terra exposes) |
+| `external_synced_at` | timestamptz | When the row was last confirmed from the vendor pipeline |
+| `created_at` | timestamptz | Row created in Lockeroom |
+
+> **Deduping:** Recommend unique constraint on `(member_id, activity_date, source, coalesce(provider, ''))` once providers are stable.
+
+---
+
+### `member_health_workouts`
+Discrete **workout** sessions (cardio, strength, sport, etc.), regardless of origin. Use for TeamBuilder-backed workouts today and for future in-app logged sessions or Terra **`activity`** payloads.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `name` | text | Display name (e.g. "Morning run") |
+| `workout_type` | text | Normalised type label or vendor type code (store raw code in JSON if needed) |
+| `start_time` | timestamptz | Session start |
+| `end_time` | timestamptz | Session end |
+| `duration_seconds` | int | Optional; can be derived |
+| `calories` | numeric | Optional |
+| `distance_meters` | numeric | Optional |
+| `avg_hr_bpm` | numeric | Optional |
+| `max_hr_bpm` | numeric | Optional |
+| `source` | text | e.g. `teambuilder`, `app`, `terra` |
+| `provider` | text | Optional; Terra/wearable vendor when applicable |
+| `external_workout_id` | text | Stable external id (e.g. Terra `metadata.summary_id`) for idempotent upserts |
+| `created_at` | timestamptz | Row created in Lockeroom |
+
+> **Future detail tables:** Sets/reps, GPS polylines, lap splits, per-second HR streams—add child tables later; keep this row as the summary anchor.
+
+---
+
+### External health connections & Terra API (ingestion)
+
+Terra provides normalised **Daily**, **Activity** (workout), **Body**, **Sleep**, and related payloads via webhooks and REST; see [Terra data models](https://docs.tryterra.co/reference/health-and-fitness-api/data-models), [samples](https://docs.tryterra.co/reference/health-and-fitness-api/samples), [event types](https://docs.tryterra.co/reference/health-and-fitness-api/event-types), [receiving updates](https://docs.tryterra.co/health-and-fitness-api/managing-user-health-data/receiving-data-updates), and [SQL destination example](https://docs.tryterra.co/health-and-fitness-api/integration-setup/setting-up-data-destinations/sql-database-postgres-mysql). Identity in webhook envelopes includes `user` with `user_id`, `reference_id` (map to `member_id`), `provider`, and `scopes`.
+
+**Principles:** store **raw** vendor payloads first, then normalise into member tables. Terra adds fields over time—raw JSON preserves forward compatibility.
+
+#### `member_external_health_connections`
+Maps a Lockeroom member to a vendor account (Terra or other).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `vendor` | text | e.g. `terra` |
+| `vendor_user_id` | text | Terra `user_id` |
+| `reference_id` | text | Terra `reference_id` — typically your `member_id` string |
+| `provider` | text | Connection slug (e.g. `APPLE`, `GARMIN`) |
+| `scopes` | text | Granted scopes string as returned by Terra |
+| `active` | boolean | Connection usable |
+| `last_webhook_update` | timestamptz | Optional mirror of Terra `last_webhook_update` |
+| `created_at` / `updated_at` | timestamptz | Housekeeping |
+
+#### `terra_events_raw` (or generic `health_vendor_events_raw`)
+Append-only (or idempotent upsert) store for webhook bodies before normalisation.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `connection_id` | uuid | Optional FK → `member_external_health_connections.id` |
+| `vendor_user_id` | text | Terra user id if connection row not yet linked |
+| `event_type` | text | e.g. `daily`, `activity`, `body`, `sleep` |
+| `payload` | jsonb | Full JSON; include headers/metadata if useful for debugging |
+| `received_at` | timestamptz | Server receive time |
+| `idempotency_key` | text | Optional dedupe key (event id, hash, or Terra payload id) |
+
+#### `terra_devices` (optional)
+Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `software_version`, etc.) if you need device-level reporting.
+
+#### Normalisation mapping (target Lockeroom tables)
+
+| Terra-style payload | Target |
+|---------------------|--------|
+| Body / `MeasurementDataSample` style measurements | `member_health_metrics` (set `source` appropriately, map units) |
+| Daily summary (steps, day HR summaries, scores) | `member_health_activity_daily` |
+| Activity / workout session | `member_health_workouts` |
+| Sleep | Future `member_health_sleep_sessions` (document when implemented—not required for this revision) |
+| High-frequency samples (HR streams, GPS points) | Future child tables; keep raw in `terra_events_raw` until needed |
 
 ---
 

@@ -40,7 +40,10 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `membership_types` | Membership product definitions |
 | `membership_versions` | Historical pricing and policy snapshots |
 | `member_physicals_raw` | Physical assessment data — movement screen, benchmarks, focus/avoid fields. One row per assessment. |
-| `member_health_metrics` | InBody body composition scans — weight, bf, smm, inbody_score, date_created. |
+| `member_health_metrics` | Body composition time series (InBody + equivalent). Source-of-truth for scan/ingested height, weight, BF%, masses, BMR, InBody score, `source` (default conceptually `inbody`). See `architecture.md` §12. |
+| `member_health_activity_daily` | Daily aggregates: steps, distance, energy, simple HR summaries, scores — **not** individual workouts. |
+| `member_health_workouts` | Discrete workout sessions (TeamBuilder, app, Terra `activity`). |
+| `member_external_health_connections` | Maps `member_id` to vendor health accounts (e.g. Terra `user_id`, `reference_id`, `provider`). |
 
 ---
 
@@ -87,7 +90,9 @@ Active coach = coach_id
 - `member_physicals_raw.injuries` / `.goals` = point-in-time snapshots from the assessment form — do not use as primary source
 - `member_physicals_raw.focus_program` and `.exercises_avoid` = assessment-specific programming context — no equivalent on `member_database`
 - **Assessment date:** use `submission_date WHERE source = 'form'` — rows with other source values are imports, not formal screenings
-- **Body composition:** latest `member_health_metrics` row by `date_created` desc. `smm` = skeletal muscle mass (displayed as "Muscle Mass"), `bf` = body fat %
+- **Body composition:** `member_health_metrics` is the source of truth for measurement-event body composition (not profile demographics). Latest row by `date_created` DESC unless you filter by `source`. `smm` = skeletal muscle mass (displayed as "Muscle Mass"), `bf` = body fat %. **`source`** distinguishes InBody vs `app` vs `terra` vs other ingest. Canonical member **gender** stays on `member_database`; use `gender_at_measurement` on `member_health_metrics` only as a scan snapshot if present.
+- **Daily movement vs workouts:** Steps and day-level summaries → `member_health_activity_daily`. Sessions (runs, rides, logged strength blocks, Terra activities) → `member_health_workouts`. Do not mix both concerns in one table.
+- **Wearable / Terra:** Keep raw webhook payloads (e.g. `terra_events_raw`) before normalising into member tables. Map Terra **body** → `member_health_metrics`, **daily** → `member_health_activity_daily`, **activity** → `member_health_workouts`. Use `member_external_health_connections` to resolve Terra `user_id` / `reference_id` to `member_id`.
 
 ### Financial Data
 - Revenue/package details → join to `member_newsale_metadata` or `member_renewal_meta`
