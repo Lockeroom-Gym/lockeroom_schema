@@ -175,7 +175,7 @@
     <div class="header-title">⬡ LOCKER ROOM GYM</div>
     <div class="header-sub">DATABASE SCHEMA — NEURAL MAP</div>
   </div>
-  <span id="gen-date">Generated: 2026-05-05</span>
+  <span id="gen-date">Generated: 2026-05-07</span>
   <div id="header-right">
     <div id="welcome-msg" style="display:none">
       <div id="welcome-avatar"></div>
@@ -358,7 +358,7 @@
 // SCHEMA DATA  — run `node update-schema.js` to regenerate
 // ============================================================
 /* SCHEMA_DATA_START */
-// Auto-generated: 2026-05-05
+// Auto-generated: 2026-05-07
 // Run `node update-schema.js` to refresh
 const DOMAINS = {
   members:     { label: "Members",            color: "#00E5FF" },
@@ -692,11 +692,11 @@ const RAW_LINKS = [
   { s:"member_newsale_metadata", t:"staff_database", lbl:"salesperson_id" },
   { s:"member_newsale_metadata", t:"staff_database", lbl:"coach_id" },
   { s:"member_newsale_metadata", t:"membership_types", lbl:"membership_type_id" },
-  { s:"member_not_renewing", t:"staff_database", lbl:"handoff_coach_id" },
   { s:"member_not_renewing", t:"staff_database", lbl:"renewal_assignee" },
+  { s:"member_not_renewing", t:"staff_database", lbl:"salesperson_id" },
   { s:"member_not_renewing", t:"staff_database", lbl:"revenue_team_assignee" },
   { s:"member_not_renewing", t:"staff_database", lbl:"coach_id" },
-  { s:"member_not_renewing", t:"staff_database", lbl:"salesperson_id" },
+  { s:"member_not_renewing", t:"staff_database", lbl:"handoff_coach_id" },
   { s:"member_not_renewing", t:"member_memberships", lbl:"membership_id" },
   { s:"member_not_renewing", t:"member_newsale_metadata", lbl:"newsale_metadata_id" },
   { s:"member_not_renewing", t:"staff_database", lbl:"programming_coach_id" },
@@ -727,15 +727,15 @@ const RAW_LINKS = [
   { s:"member_referral_leaderboard", t:"system_referral_config", lbl:"system_referral_config_id" },
   { s:"member_referral_log", t:"member_database", lbl:"member_id" },
   { s:"member_referral_log", t:"staff_database", lbl:"staff_member_id" },
-  { s:"member_referral_touchpoint", t:"member_database", lbl:"member_id" },
   { s:"member_referral_touchpoint", t:"staff_database", lbl:"staff_id" },
+  { s:"member_referral_touchpoint", t:"member_database", lbl:"member_id" },
   { s:"member_referral_tracker", t:"member_database", lbl:"member_id" },
   { s:"member_referral_tracker", t:"staff_database", lbl:"referral_owner_id" },
-  { s:"member_renewal_meta", t:"staff_database", lbl:"coach_id" },
   { s:"member_renewal_meta", t:"member_database", lbl:"member_id" },
   { s:"member_renewal_meta", t:"membership_types", lbl:"membership_type_id" },
   { s:"member_renewal_meta", t:"staff_database", lbl:"salesperson_id" },
   { s:"member_renewal_meta", t:"holds_policies", lbl:"holds_policy_fk" },
+  { s:"member_renewal_meta", t:"staff_database", lbl:"coach_id" },
   { s:"member_tbhealthmax", t:"member_database", lbl:"member_id" },
   { s:"member_tbresults", t:"member_database", lbl:"member_id" },
   { s:"member_vo2_milestones", t:"member_database", lbl:"member_id" },
