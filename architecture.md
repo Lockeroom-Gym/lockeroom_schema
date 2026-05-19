@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-04-13
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-05-19
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -38,6 +38,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | **Role semantics** | `role` = primary title / seniority line; `supplementary_roles` = `text[]` extra hats (non–tenure-track, operational extras) |
 | **Personality / PV** | Narrative + **`personality` text** live in **`staff_personal_vision`** (per `staff_id`), not on `staff_database`. Optional numeric **`style_*`** ints on `staff_database` are separate coaching-style dimensions |
 | **1:1 / HR notes** | Manager ↔ direct report check-ins: **`hr_direct_report`** (`manager_id`, `coach_id` = report), one row per submission (~weekly); not member data |
+| **Member weekly check-in** | Submission header: **`member_checkins`**; dynamic answers: **`member_checkin_responses`**; visible fields via **`resolve_member_checkin_questions(member_id)`** and **`member_checkin_question_settings`** |
 
 ---
 
@@ -62,7 +63,7 @@ The single source of truth for member demographics, contact info, and primary co
 | `gym_string` | text | Home gym location |
 | `referral_source_name` | text | |
 | `referral_source_email` | text | |
-| `referrer_id` | uuid | FK → `member_database.id` — if referred by another member |
+| `referrer_id` | uuid | FK → `member_database.id` — **canonical** referring member when the new member was referred by an existing Lockeroom member |
 | `stripe_primary_fk` | uuid | Stripe billing reference |
 | `initial_weight` | numeric | |
 | `initial_bf_percentage` | numeric | |
@@ -79,6 +80,32 @@ The single source of truth for member demographics, contact info, and primary co
 > **Note:** `coach_id` here is the member's default coach. The active assignment may differ at the membership level — always use `member_memberships.coach_id` and `member_memberships.handoff_coach_id` for current operational context.
 
 > **Health & goals source of truth:** `injuries` and `goals` on `member_database` are the canonical fields for a member's injury history and objectives. `member_physicals_raw` stores assessment-specific fields (`focus_program`, `exercises_avoid`) captured at each physical screening — do not conflate these with the profile-level `injuries`/`goals`.
+
+### Member referral attribution (`member_referral_leaderboard`)
+
+**Canonical source:** `member_database.referrer_id` on the **referred** member row.
+
+**Synchronized table:** `member_referral_leaderboard` — one attribution row per referred member (non-backfill), used by Coach OS Referral Leaderboard counts.
+
+| Column | Role |
+|--------|------|
+| `existing_client_id` | Referring member (`member_database.id` = `referrer_id`) |
+| `referred_client_id` | Referred member |
+| `referred_membership_id` | Earliest primary membership for the referred member (`primary_membership_id IS NULL`, then earliest `start_date`) |
+| `referral_date` | That membership's `start_date` |
+| `backfill` | `true` = legacy import; **not** managed by sync (preserved) |
+
+**Referral count (per referrer):** `COUNT(*)` or `COUNT(DISTINCT referred_client_id)` from `member_referral_leaderboard` where `existing_client_id = referrer_member_id`. Equivalent for members with a membership: count referred rows where `member_database.referrer_id = referrer_member_id`.
+
+**DB sync (migration `sync_referrer_id_to_member_referral_leaderboard`):**
+
+- `sync_member_referral_leaderboard_for_member(referred_client_id)` upserts/deletes non-backfill leaderboard rows from `referrer_id` + membership.
+- Trigger on `member_database` (`referrer_id` insert/update).
+- Trigger on `member_memberships` (insert/update) so attribution is created when membership arrives after `referrer_id` is set.
+- If `referrer_id` is cleared, non-backfill leaderboard rows for that referred client are removed.
+- If the referred member has **no** membership yet, leaderboard is unchanged until a membership row exists.
+
+**Related (not the leaderboard count):** `lead_referral` + `member_referral_credits` handle lead signup credits; `member_referral_tracker` is staff outreach workflow only.
 
 ---
 
@@ -753,6 +780,55 @@ Live column names (do not duplicate with alternate spellings in migrations):
 > **Display:** `bf` as "Body Fat %", `smm` as "Muscle Mass", `date_created` as "Scan Date".
 
 > **Latest row:** Default current body composition = latest `date_created` DESC per member; filter by `source` when comparing providers.
+
+---
+
+### `member_checkins` (weekly member questionnaire)
+
+Member-submitted weekly wellbeing log (legacy Retool form + member app). **RLS enabled.** One row per submission.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `created_at` | timestamptz | Submission time |
+| `member_id` | uuid | FK → `member_database.id` |
+| `coach_id` | uuid | FK → `staff_database.id`, optional |
+| `email` | text | Optional snapshot |
+| `training_intensity` … `momentum` | numeric | 1–10 sliders (legacy wide columns; still dual-written from app) |
+| `factors` | text | Positive reflection |
+| `challenge` | text | Challenges |
+| `wins` | text | Wins |
+| `daily_steps` | smallint | **Weekly average** self-report — see `member_health_activity_daily` |
+
+**Dynamic questionnaire (2026-05):**
+
+| Table | Role |
+|--------|------|
+| `checkin_questions` | Catalog (`question_key`, label, `question_type`: `scale_1_10` \| `text` \| `integer`) |
+| `checkin_templates` | Named templates; active default: `weekly_default` |
+| `checkin_template_questions` | Questions on a template |
+| `member_checkin_question_settings` | Per-member enable/disable (`is_enabled`); coach/ops via service role or Retool |
+| `member_checkin_responses` | Normalized answers (`checkin_id`, `question_id`, `numeric_value` / `text_value`) |
+
+**RPC:** `resolve_member_checkin_questions(p_member_id uuid)` — returns visible questions for the member app; enforces `current_member_ids()` (or `service_role`).
+
+**Reporting:** Legacy dashboards use wide `member_checkins` columns; dynamic-only fields join `member_checkin_responses` → `checkin_questions`. View `view_member_checkins_resolved` exposes submission headers.
+
+---
+
+### `member_coach_notes`
+
+Coach-authored notes per member. **`note_type`** enum includes `goal`, `habits`, `general notes`, `team`, `other`.
+
+| Column | Notes |
+|--------|-------|
+| `member_id` | FK → `member_database.id` |
+| `coach_id` | FK → `staff_database.id` |
+| `note_type` | Use `goal` and `habits` for member app “current focus” |
+| `note_content` | Free text |
+| `created_at` / `updated_at` | Latest row per type wins |
+
+**Member app:** do not query this table directly from the client (RLS off). Use RPC **`get_member_current_goal_habit(member_id)`** → `{ goal, habit }` (security definer, scoped to `current_member_ids()`).
 
 ---
 

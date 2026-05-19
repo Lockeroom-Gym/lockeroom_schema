@@ -41,6 +41,8 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `membership_versions` | Historical pricing and policy snapshots |
 | `member_physicals_raw` | Physical assessment data — movement screen, benchmarks, focus/avoid fields. One row per assessment. |
 | `member_health_metrics` | Body composition (InBody + ingest). Live columns: `bfm`, `ffm`, `smm`, `bone_mineral_content`, `tbw`, `bmr`, `age`, `inbody_score`, `source`. See `architecture.md` §12. |
+| `member_checkins` | Weekly member wellbeing submissions (wide legacy columns). Dynamic form: `checkin_questions`, `member_checkin_responses`, `resolve_member_checkin_questions`. |
+| `member_coach_notes` | Coach notes; member app reads latest `goal` / `habits` via `get_member_current_goal_habit` only. |
 | `member_health_activity_daily` | Steps/movement summaries by day. Use `input_kind`: `vendor_daily` vs `manual_checkin_weekly_avg` (member_checkins weekly average — label in UI). Not workouts. |
 | `member_health_workouts` | Discrete workout sessions (TeamBuilder, app, Terra `activity`). |
 | `member_health_connections` | Maps `member_id` to vendor health accounts (e.g. Terra `user_id`, `reference_id`, `provider`). |
