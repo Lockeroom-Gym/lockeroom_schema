@@ -41,6 +41,7 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `membership_versions` | Historical pricing and policy snapshots |
 | `member_physicals_raw` | Physical assessment data — movement screen, benchmarks, focus/avoid fields. One row per assessment. |
 | `member_health_metrics` | Body composition (InBody + ingest). Live columns: `bfm`, `ffm`, `smm`, `bone_mineral_content`, `tbw`, `bmr`, `age`, `inbody_score`, `source`. See `architecture.md` §12. |
+| `member_nutrition_targets` | Coach-managed current calorie/macro targets — one row per member. Member app read-only; Coach OS writes via service role. See `architecture.md` §12. |
 | `member_checkins` | Weekly member wellbeing submissions (wide legacy columns). Dynamic form: `checkin_questions`, `member_checkin_responses`, `resolve_member_checkin_questions`. |
 | `member_coach_notes` | Coach notes; member app reads latest `goal` / `habits` via `get_member_current_goal_habit` only. |
 | `member_health_activity_daily` | Steps/movement summaries by day. Use `input_kind`: `vendor_daily` vs `manual_checkin_weekly_avg` (member_checkins weekly average — label in UI). Not workouts. |
@@ -93,6 +94,7 @@ Active coach = coach_id
 - `member_physicals_raw.focus_program` and `.exercises_avoid` = assessment-specific programming context — no equivalent on `member_database`
 - **Assessment date:** use `submission_date WHERE source = 'form'` — rows with other source values are imports, not formal screenings
 - **Body composition:** `member_health_metrics` is the source of truth for measurement-event body composition (not profile demographics). Latest row by `date_created` DESC unless you filter by `source`. Key columns include `bf`, `bfm`, `ffm`, `smm`, `age` (scan age). **`source`** distinguishes InBody vs `app` vs `terra` vs other ingest. Canonical profile **gender** = `member_database.gender`; `member_health_metrics.gender` is scan-time only if populated.
+- **Nutrition targets:** `member_nutrition_targets` holds the **current** coach-assigned calorie and macro goals (one row per `member_id`). Logged food intake (Terra/Phenomena) is separate. Weekly weight on the nutrition card aggregates `member_health_metrics.weight` by Monday week from `date_created`.
 - **Daily movement vs workouts:** Steps and day-level summaries → `member_health_activity_daily` (respect `input_kind`). Sessions → `member_health_workouts` or existing cardio tables. Do not mix step rows with structured workouts.
 - **Wearable / Terra:** Keep raw webhook payloads (e.g. `terra_events_raw`) before normalising. Map Terra **body** → `member_health_metrics`, **daily** → `member_health_activity_daily` (`input_kind = vendor_daily`), **activity** → `member_health_workouts`. Use `member_health_connections` to resolve Terra `user_id` / `reference_id` to `member_id`.
 - **Internal VO2 test score:** Raw `member_cardio_workout_log`; computed **`view_cardio_vo2_scores.vo2_score`** (watts formula uses **`avg_watts`**, not `max_watts`).

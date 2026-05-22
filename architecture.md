@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-05-19
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-05-22
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -39,6 +39,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | **Personality / PV** | Narrative + **`personality` text** live in **`staff_personal_vision`** (per `staff_id`), not on `staff_database`. Optional numeric **`style_*`** ints on `staff_database` are separate coaching-style dimensions |
 | **1:1 / HR notes** | Manager ↔ direct report check-ins: **`hr_direct_report`** (`manager_id`, `coach_id` = report), one row per submission (~weekly); not member data |
 | **Member weekly check-in** | Submission header: **`member_checkins`**; dynamic answers: **`member_checkin_responses`**; visible fields via **`resolve_member_checkin_questions(member_id)`** and **`member_checkin_question_settings`** |
+| **Nutrition targets** | **`member_nutrition_targets`** — one current row per member (coach-managed). Logged intake (Terra/Phenomena) is separate; weight trend from **`member_health_metrics`** |
 
 ---
 
@@ -649,6 +650,7 @@ member_database
   ├── id ←── member_biomap.member_id
   ├── id ←── member_physicals_raw.member_id
   ├── id ←── member_health_metrics.member_id
+  ├── id ←── member_nutrition_targets.member_id
   ├── id ←── member_health_activity_daily.member_id
   ├── id ←── member_health_workouts.member_id
   ├── id ←── member_health_connections.member_id
@@ -780,6 +782,37 @@ Live column names (do not duplicate with alternate spellings in migrations):
 > **Display:** `bf` as "Body Fat %", `smm` as "Muscle Mass", `date_created` as "Scan Date".
 
 > **Latest row:** Default current body composition = latest `date_created` DESC per member; filter by `source` when comparing providers.
+
+> **Nutrition card weight:** For weekly average logged weight on the member app nutrition chart, aggregate `weight` by calendar week (Monday start) from `date_created`. Do not duplicate weight into `member_nutrition_targets`.
+
+---
+
+### `member_nutrition_targets`
+
+Coach-assigned **current** nutrition targets. **One row per member** (`member_id` PK). Not a history table — when targets change, update the row in place (or replace via upsert from Coach OS).
+
+**RLS:** `SELECT` for authenticated members where `member_id IN (SELECT current_member_ids())`. No member `INSERT`/`UPDATE`/`DELETE` in v1 — coach/staff writes via **service role** or internal tooling.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `member_id` | uuid | PK, FK → `member_database.id` |
+| `calorie_goal_kcal` | integer | Required; daily calorie target |
+| `protein_goal_percent` | numeric(5,2) | Optional; % of calories from protein (member app “Current Protein Goal”) |
+| `protein_goal_grams` | integer | Optional; daily protein grams |
+| `carb_goal_percent` | numeric(5,2) | Optional; % of calories from carbohydrate |
+| `carb_goal_grams` | integer | Optional; daily carb grams |
+| `fat_goal_percent` | numeric(5,2) | Optional; % of calories from fat |
+| `fat_goal_grams` | integer | Optional; daily fat grams |
+| `set_by_staff_id` | uuid | FK → `staff_database.id`, optional — who set the plan |
+| `notes` | text | Coach-only context; not required in member UI v1 |
+| `created_at` | timestamptz | |
+| `updated_at` | timestamptz | |
+
+**Constraints:** `calorie_goal_kcal > 0`; percent columns 0–100 when set; gram columns ≥ 0 when set.
+
+**Logged intake (separate):** Actual calories and macros shown on the nutrition chart come from food-log / Terra ingest (future), not this table. Compare weekly averages against the **current** row’s goals.
+
+**Member app labels:** “Current Calorie Goal”, “Current Protein Goal”, optional carb/fat goals when columns are populated.
 
 ---
 

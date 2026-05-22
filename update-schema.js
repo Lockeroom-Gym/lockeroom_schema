@@ -253,6 +253,7 @@ function generateDescription(tableName, columns) {
     schedule_preferences: 'Coach block preferences: HARD (unavailable) / SOFT / PREFERRED',
     hubspot_contacts_clean: 'HubSpot CRM contacts (leads/prospects) — synced periodically, not real-time',
     member_health_metrics: 'Body composition time series (InBody + app/wearable ingest): weight, BF%, masses, BMR, score, source — see architecture §12',
+    member_nutrition_targets: 'Coach-managed current calorie/macro targets — one row per member; member read-only — see architecture §12',
     member_physicals_raw: 'Quarterly fitness assessments: VO2, push-ups, grip strength, vertical jump, RSI',
     programming_generated: 'AI-generated personalised workout programs for members',
     pm_projects:        'Internal project tracking — top-level projects and initiatives',
