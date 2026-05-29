@@ -175,7 +175,7 @@
     <div class="header-title">⬡ LOCKER ROOM GYM</div>
     <div class="header-sub">DATABASE SCHEMA — NEURAL MAP</div>
   </div>
-  <span id="gen-date">Generated: 2026-05-28</span>
+  <span id="gen-date">Generated: 2026-05-29</span>
   <div id="header-right">
     <div id="welcome-msg" style="display:none">
       <div id="welcome-avatar"></div>
@@ -358,7 +358,7 @@
 // SCHEMA DATA  — run `node update-schema.js` to regenerate
 // ============================================================
 /* SCHEMA_DATA_START */
-// Auto-generated: 2026-05-28
+// Auto-generated: 2026-05-29
 // Run `node update-schema.js` to refresh
 const DOMAINS = {
   members:     { label: "Members",            color: "#00E5FF" },
@@ -801,15 +801,15 @@ const RAW_LINKS = [
   { s:"member_referral_log", t:"staff_database", lbl:"staff_member_id" },
   { s:"member_referral_touchpoint", t:"member_database", lbl:"member_id" },
   { s:"member_referral_touchpoint", t:"staff_database", lbl:"staff_id" },
-  { s:"member_referral_tracker", t:"staff_database", lbl:"referral_owner_id" },
   { s:"member_referral_tracker", t:"member_database", lbl:"member_id" },
+  { s:"member_referral_tracker", t:"staff_database", lbl:"referral_owner_id" },
   { s:"member_referral_tracker_activity_log", t:"member_database", lbl:"member_id" },
   { s:"member_referral_tracker_activity_log", t:"staff_database", lbl:"saved_by_staff_id" },
   { s:"member_referral_tracker_activity_log", t:"staff_database", lbl:"referral_owner_id" },
   { s:"member_renewal_meta", t:"staff_database", lbl:"coach_id" },
-  { s:"member_renewal_meta", t:"membership_types", lbl:"membership_type_id" },
-  { s:"member_renewal_meta", t:"staff_database", lbl:"salesperson_id" },
   { s:"member_renewal_meta", t:"member_database", lbl:"member_id" },
+  { s:"member_renewal_meta", t:"staff_database", lbl:"salesperson_id" },
+  { s:"member_renewal_meta", t:"membership_types", lbl:"membership_type_id" },
   { s:"member_renewal_meta", t:"holds_policies", lbl:"holds_policy_fk" },
   { s:"member_st_metrics_daily", t:"programming_movement_patterns", lbl:"pattern" },
   { s:"member_st_tracker_lifts", t:"programming_movement_patterns", lbl:"pattern" },
@@ -857,8 +857,8 @@ const RAW_LINKS = [
   { s:"rolling_schedule_preferences", t:"rolling_schedule_preferences", lbl:"superseded_by" },
   { s:"sales_availability_slots", t:"staff_database", lbl:"coach_id" },
   { s:"sales_schedule", t:"staff_database", lbl:"staff_id" },
-  { s:"schedule_calendar_blocks", t:"work_calendar", lbl:"the_date" },
   { s:"schedule_calendar_blocks", t:"schedule_block_config", lbl:"block_id" },
+  { s:"schedule_calendar_blocks", t:"work_calendar", lbl:"the_date" },
   { s:"schedule_change_log", t:"schedule_periods", lbl:"period_id" },
   { s:"schedule_change_log", t:"schedule_changesets", lbl:"changeset_id" },
   { s:"schedule_changesets", t:"schedule_periods", lbl:"period_id" },
@@ -867,28 +867,28 @@ const RAW_LINKS = [
   { s:"schedule_preferences", t:"schedule_periods", lbl:"period_id" },
   { s:"schedule_preferences", t:"schedule_block_metadata", lbl:"block" },
   { s:"schedule_proposed", t:"staff_database", lbl:"coach_id" },
-  { s:"schedule_session_coaches", t:"staff_database", lbl:"coach_id" },
   { s:"schedule_session_coaches", t:"schedule_sessions", lbl:"session_id" },
+  { s:"schedule_session_coaches", t:"staff_database", lbl:"coach_id" },
   { s:"schedule_sessions", t:"schedule_periods", lbl:"period_id" },
   { s:"schedule_sessions", t:"system_session_types", lbl:"session_type_id" },
-  { s:"staff_database", t:"system_bracket_policy_rules", lbl:"session_bracket_fk" },
   { s:"staff_database", t:"staff_database", lbl:"buddy_coach" },
+  { s:"staff_database", t:"system_bracket_policy_rules", lbl:"session_bracket_fk" },
   { s:"staff_database", t:"staff_database", lbl:"direct_report" },
   { s:"staff_leave_confirmed", t:"staff_database", lbl:"staff_id" },
   { s:"staff_leave_confirmed", t:"staff_leave_requests", lbl:"leave_request_id" },
   { s:"staff_leave_requests", t:"staff_database", lbl:"staff_id" },
-  { s:"staff_onboarding", t:"staff_database", lbl:"nswstaff_responsible" },
   { s:"staff_onboarding", t:"admin_onboarding_tasks", lbl:"task_template_id" },
-  { s:"staff_onboarding", t:"staff_database", lbl:"vicstaff_responsible" },
+  { s:"staff_onboarding", t:"staff_database", lbl:"nswstaff_responsible" },
   { s:"staff_onboarding", t:"staff_database", lbl:"staff_id" },
+  { s:"staff_onboarding", t:"staff_database", lbl:"vicstaff_responsible" },
   { s:"staff_personal_vision", t:"staff_database", lbl:"staff_id" },
   { s:"staff_supplementary_additional_hours", t:"staff_database", lbl:"staff_id" },
   { s:"staff_supplementary_default_hours", t:"staff_database", lbl:"staff_id" },
   { s:"stripe_customers", t:"member_database", lbl:"member_id" },
   { s:"stripe_invoices", t:"member_database", lbl:"member_id" },
   { s:"stripe_invoices", t:"member_memberships", lbl:"membership_id" },
-  { s:"survey_newclient_nps", t:"staff_database", lbl:"coach_id" },
   { s:"survey_newclient_nps", t:"member_database", lbl:"member_id" },
+  { s:"survey_newclient_nps", t:"staff_database", lbl:"coach_id" },
   { s:"system_config", t:"staff_database", lbl:"staff_id" },
   { s:"system_session_gym_capacity", t:"system_session_types", lbl:"session_type_id" },
   { s:"teambuildr_completion_dd", t:"member_database", lbl:"member_id" },
