@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-05-22
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-06-11
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -29,7 +29,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | Topic | Rule |
 |--------|------|
 | **Member spine** | `member_database` → `member_memberships` → financial rows (`member_newsale_metadata` / `member_renewal_meta` via FK on membership) |
-| **Active members** | Same filters on `member_memberships`; join `member_database` to exclude `test_account = true`; do **not** filter `status` |
+| **Active members / client count** | **Canonical:** `SELECT COUNT(*) FROM view_client_count_2025_master` (backs onto `view_active_member_count_cohort`). Primary memberships only; exclude `test_account`; exclude `journey_stage = 'no_sale'`; exclude `member_database.current_status = 'F&F'`; `end_date IS NULL OR CURRENT_DATE <= end_date`; do **not** filter `member_memberships.status` |
 | **Active coach** | `COALESCE(handoff_coach_id, coach_id)` on `member_memberships` (handoff wins) |
 | **Renewal vs revenue role** | `renewal_assignee` = end-of-term renewal conversation; `revenue_team_assignee` = 3mo/9mo calls — different columns |
 | **Money / package** | Never infer from `member_memberships` alone — join newsale or renewal metadata |
@@ -169,12 +169,16 @@ The central table. Each row represents one membership term. A member can have mu
 
 #### Key Business Rules
 
-**Active member count:**
-- `COUNT(DISTINCT member_id)`
-- Filter: `primary_membership_id IS NULL` (primary memberships only)
-- Filter: `CURRENT_DATE <= end_date` (include future starts, do not enforce `start_date <= CURRENT_DATE`)
-- Do NOT filter by `status` — active, pending, indefinite_hold, F&F, and inactive all count
-- Exclude: `journey_stage = 'no_sale'`
+**Active member count (canonical):**
+- **Prefer the view:** `SELECT COUNT(*) FROM view_client_count_2025_master` — same cohort as Member Health, Referral Leaderboard, and Program Health (`view_active_member_count_cohort`).
+- **By gym:** `SELECT gym, COUNT(*) FROM view_client_count_2025_master GROUP BY gym ORDER BY 2 DESC`
+- Hand-rolled SQL must match the view:
+  - `COUNT(DISTINCT member_id)` on primary memberships (`primary_membership_id IS NULL`)
+  - Join `member_database`; exclude `test_account = true`
+  - Exclude `member_database.current_status = 'F&F'` (Friends & Family — not counted in operational client totals)
+  - Exclude `journey_stage = 'no_sale'`
+  - Active by date: `end_date IS NULL OR CURRENT_DATE <= end_date` (include future starts; do not enforce `start_date <= CURRENT_DATE`)
+  - Do NOT filter `member_memberships.status` — active, pending, indefinite_hold, and inactive statuses on the row still count when date rules pass
 
 **Primary vs Secondary Memberships & Session Counting:**
 - A secondary membership is identified by `primary_membership_id IS NOT NULL` (it points to the parent/primary `member_memberships.id`).
@@ -618,6 +622,8 @@ Historical pricing and policy snapshots. Older memberships retain their original
 
 | View | Purpose |
 |------|---------|
+| `view_active_member_count_cohort` | **Canonical active-client cohort** — one row per member; primary, non-test, not `no_sale`, not F&F, calendar-active by `end_date`. Member Health, Referral, Program Health base. |
+| `view_client_count_2025_master` | **Canonical client-count projection** — thin wrapper over `view_active_member_count_cohort` with coach names. Use `SELECT COUNT(*) FROM view_client_count_2025_master` for total active clients. |
 | `view_all_members` | `member_database` without age calculation — use for general member queries |
 | `view_active_members` | Pre-filtered active members with coach and membership info |
 | `view_member_membership_full_details` | Members + memberships + version info joined — avoids manual joins |
@@ -978,11 +984,11 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 
 ## Appendix: General Query Rules
 
-1. **Never double-count members.** Always `COUNT(DISTINCT member_id)`.
+1. **Never double-count members.** Always `COUNT(DISTINCT member_id)` when hand-rolling; for total active clients prefer `SELECT COUNT(*) FROM view_client_count_2025_master`.
 2. **Primary memberships only.** Filter `primary_membership_id IS NULL` when counting core clients.
-3. **Do not filter by status** for active member counts — all statuses count except expired (`end_date < CURRENT_DATE`) and `journey_stage = 'no_sale'`.
-4. **Date logic.** Active = `CURRENT_DATE <= end_date`. Do not enforce `start_date <= CURRENT_DATE` (future starts count).
-5. **Use views where available.** `view_member_membership_full_details`, `view_active_members`, `view_member_calls_with_status` handle complex joins.
+3. **Do not filter `member_memberships.status`** for active client counts — row statuses (active, pending, indefinite_hold, inactive, etc.) still count when date rules pass. Exclusions: `journey_stage = 'no_sale'`, `member_database.current_status = 'F&F'`, and calendar-expired (`end_date < CURRENT_DATE` when `end_date` is not null).
+4. **Date logic.** Active = `end_date IS NULL OR CURRENT_DATE <= end_date`. Do not enforce `start_date <= CURRENT_DATE` (future starts count).
+5. **Use views where available.** For active client totals use `view_client_count_2025_master` / `view_active_member_count_cohort`. For joins: `view_member_membership_full_details`, `view_active_members`, `view_member_calls_with_status`.
 6. **Financial data lives in metadata tables.** Join `member_memberships` → `member_newsale_metadata` or `member_renewal_meta` for pricing, package details, and margin calculations.
 7. **Coach hour config is live.** Never hardcode values from `work_estimations` or `system_config` — always query the DB.
 8. **`pipeline_lost` is a prediction, not an outcome.** Never use `pipeline_lost` to identify churned members. Use `journey_stage = 'not_renewing'` for confirmed leaving. Use `end_date < CURRENT_DATE` for expired memberships. `pipeline_lost = 'bad_churn'` means a manager has flagged the member as a saveable save-conversation priority. `pipeline_lost = 'good_churn'` means the manager expects the member to leave due to relocation.
