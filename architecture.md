@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-06-11
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-06-18
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -21,6 +21,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 10. [Key Views](#10-key-views)
 11. [FK Relationship Map](#11-fk-relationship-map)
 12. [Assessments & Health Data](#12-assessments--health-data)
+13. [Renewal Tracker (Coach OS)](#13-renewal-tracker-coach-os)
 
 ---
 
@@ -40,6 +41,8 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | **1:1 / HR notes** | Manager ↔ direct report check-ins: **`hr_direct_report`** (`manager_id`, `coach_id` = report), one row per submission (~weekly); not member data |
 | **Member weekly check-in** | Submission header: **`member_checkins`**; dynamic answers: **`member_checkin_responses`**; visible fields via **`resolve_member_checkin_questions(member_id)`** and **`member_checkin_question_settings`** |
 | **Nutrition targets** | **`member_nutrition_targets`** — one current row per member (coach-managed). Logged intake (Terra/Phenomena) is separate; weight trend from **`member_health_metrics`** |
+| **Renewal Tracker reads** | Coach OS `/management/renewal-tracker` — primary grid: **`view_renewal_tracker_memberships`**; Financials margin: **`view_membership_costs_with_lead`** (not raw `view_membership_costs`); VO2 sales: **`view_thirty_day_vo2_memberships`** (90-day load; UI filters 30/60/90) |
+| **Margin % storage** | **`view_membership_costs.margin_percent`** is a **0–1 ratio** (e.g. `0.5` = 50%). Multiply by 100 for display. Weighted headline margin = `SUM(margin) ÷ SUM(membership_value_ex_gst)` |
 
 ---
 
@@ -633,6 +636,12 @@ Historical pricing and policy snapshots. Older memberships retain their original
 | `view_member_calls_with_status` | All scheduled calls (3-month, 9-month, renewal) with status and all staff role assignments denormalized |
 | `view_member_calls_flat` | Simplified call list without status |
 | `view_membership_costs` | Full cost breakdown per membership — margin, per-session value, total cost |
+| `view_membership_costs_with_lead` | **`view_membership_costs`** plus `renewal_assignee` (uuid) and `renewal_assignee_name` (text) from `member_memberships` → `staff_database`. **Use for Financials / margin-by-lead reporting** (Coach OS Renewal Tracker). |
+| `view_renewal_tracker_memberships` | Renewal Tracker main grid — memberships with coach/staff joins, phone, last physicals; excludes `test_account`. Ordered `end_date DESC`. |
+| `view_renewal_contract_value` | Renewal contract value for Churn & Financials accordion — from `member_renewal_meta`. |
+| `view_no_rm_memberships` | Primary memberships with `rm = false` (No RM accordion). |
+| `view_thirty_day_vo2_memberships` | Primary memberships with `start_date` in the **last 90 days** (one row per member); `is_vo2_membership` from primary or secondary type name. Coach OS UI filters 30/60/90 client-side. |
+| `member_holds_summary` | Aggregated hold credits per active membership (Hold Credits tab). |
 | `view_coach_session_expectations` | Computed expected sessions from contract hours minus role hours (planning/reference only — balance view uses logged expectations) |
 | `view_coach_session_balance_sep25` | Main balance view — actual vs expected hours per coach per week |
 | `view_staff_hours_weekly` | Supplementary hours per coach per week |
@@ -982,6 +991,77 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 
 ---
 
+## 13. Renewal Tracker (Coach OS)
+
+Coach OS route: `/management/renewal-tracker`. Read views are `security_invoker`; writes use RPCs gated by `can_manage_renewal_tracker()`.
+
+**Migrations (coachOS repo):** `20260616120000_renewal_tracker_view_and_rpcs.sql`, `20260616180000_view_renewal_contract_value.sql`, `20260616190000_view_no_rm_memberships.sql`, `20260616200000_view_thirty_day_vo2_memberships.sql`, `20260617120000_view_vo2_memberships_90_day_window.sql`, `20260618120000_view_membership_costs_with_lead.sql`, `20260616210000_view_member_holds_summary.sql`.
+
+### `view_renewal_tracker_memberships`
+
+Main renewal pipeline grid. Base: `member_memberships` with type/coach/staff joins and `member_database` (phone, last physicals). Excludes `test_account = true`. Paginated in UI (1000 rows/page).
+
+### `view_membership_costs_with_lead`
+
+All columns from **`view_membership_costs`**, plus:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `renewal_assignee` | uuid | FK → `staff_database.id` from `member_memberships.renewal_assignee` |
+| `renewal_assignee_name` | text | `staff_database.coach_name` or `first_name || ' ' || last_name` |
+
+**Financials modal** (Coach OS) fetches this view for margin KPI cards, by-renewal-lead table, and drill-down modals. Prefer over `view_membership_costs` when renewal lead attribution is needed.
+
+**Key cost columns** (inherited from `view_membership_costs`):
+
+| Column | Notes |
+|--------|-------|
+| `membership_value` / `membership_value_ex_gst` | Contract value (ex-GST used for weighted margin) |
+| `perform_cost`, `rm_cost`, `vo2_cost`, `total_overall_cost` | Delivery cost components |
+| `margin` | `membership_value` minus total delivery cost |
+| `margin_percent` | **Ratio 0–1** (multiply × 100 for display). Null when margin cannot be computed. |
+
+### `view_thirty_day_vo2_memberships`
+
+VO2 sales cohort despite the name — window is **90 days** on `start_date` (`CURRENT_DATE - 90` through `CURRENT_DATE`).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `membership_id` | uuid | Primary membership id |
+| `member_id` | uuid | |
+| `member_name` | text | |
+| `start_date` / `end_date` | date | |
+| `gym` | text | |
+| `membership_stage` | text | Used to split renewals vs new sales in UI |
+| `journey_stage` | text | |
+| `membership_name` | text | Primary type name |
+| `secondary_membership_names` | text | Comma-separated child type names |
+| `is_vo2_membership` | boolean | `true` when primary or any secondary type name ILIKE `%VO2%` |
+
+One row per member (latest primary in window). UI applies 30/60/90-day filters client-side.
+
+### `view_renewal_contract_value`
+
+Renewal contract value rows for Churn & Financials accordion — sourced from `member_renewal_meta` with membership joins.
+
+### `view_no_rm_memberships`
+
+Primary memberships (`primary_membership_id IS NULL`) where RM is not included (`rm = false`).
+
+### `member_holds_summary`
+
+Aggregated hold-credit totals per active membership for the Hold Credits tab.
+
+### Write RPCs
+
+| RPC | Purpose |
+|-----|---------|
+| `renewal_tracker_set_assignments` | Bulk update revenue / renewal / nutrition assignees (COALESCE partial update) |
+| `renewal_tracker_update_pipeline_lost` | Bulk `pipeline_lost` (`NULL` / `bad_churn` / `good_churn`) |
+| `renewal_tracker_update_membership_notes` | Single-row membership notes |
+
+---
+
 ## Appendix: General Query Rules
 
 1. **Never double-count members.** Always `COUNT(DISTINCT member_id)` when hand-rolling; for total active clients prefer `SELECT COUNT(*) FROM view_client_count_2025_master`.
@@ -994,10 +1074,11 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 8. **`pipeline_lost` is a prediction, not an outcome.** Never use `pipeline_lost` to identify churned members. Use `journey_stage = 'not_renewing'` for confirmed leaving. Use `end_date < CURRENT_DATE` for expired memberships. `pipeline_lost = 'bad_churn'` means a manager has flagged the member as a saveable save-conversation priority. `pipeline_lost = 'good_churn'` means the manager expects the member to leave due to relocation.
 9. **`member_batch_attendance` is a view.** It recomputes live from `member_daily_sessions_attended` and `member_lcns`. Do not treat it as a cached or pre-aggregated table — it has no materialisation. For performance-sensitive queries over large date ranges, go to the base tables directly.
 10. **`renewal_assignee` vs `revenue_team_assignee`:** these are two different roles. `renewal_assignee` conducts the end-of-term renewal conversation. `revenue_team_assignee` handles the 3-month and 9-month check-in calls during the membership. Do not conflate them.
-11. **Confirmed-leaving indicators (in order of certainty):**
+11. **`margin_percent` is a ratio.** On `view_membership_costs` / `view_membership_costs_with_lead`, `margin_percent` is stored 0–1 (0.7 = 70%). For weighted portfolio margin use `SUM(margin) / SUM(membership_value_ex_gst)`, not `AVG(margin_percent)`.
+12. **Confirmed-leaving indicators (in order of certainty):**
     1. `journey_stage = 'not_renewing'` — member has told Lockeroom they are leaving. Strongest signal.
     2. `end_date < CURRENT_DATE` AND no subsequent membership row — membership lapsed.
     3. `member_not_renewing` table record — churn has been formally logged with reason and metadata.
     `pipeline_lost`, `membership_notes`, and churn risk scores are predictive signals only — not confirmed outcomes.
-12. **Test accounts:** Exclude `member_database.test_account = true` from reporting and analytics (mirrors member-side rules).
-13. **Staff & HR:** Current roster → `staff_database.staff_status = 'active'`. **`role`** = primary title/seniority; **`supplementary_roles`** = extra non-rank duties. **`staff_personal_vision`** (join `staff_id`) holds **`personality`** and personal-vision fields. **`hr_direct_report`** = manager ↔ direct-report check-in rows (`manager_id`, `coach_id` = report), typically weekly cadence — not member data.
+13. **Test accounts:** Exclude `member_database.test_account = true` from reporting and analytics (mirrors member-side rules).
+14. **Staff & HR:** Current roster → `staff_database.staff_status = 'active'`. **`role`** = primary title/seniority; **`supplementary_roles`** = extra non-rank duties. **`staff_personal_vision`** (join `staff_id`) holds **`personality`** and personal-vision fields. **`hr_direct_report`** = manager ↔ direct-report check-in rows (`manager_id`, `coach_id` = report), typically weekly cadence — not member data.
