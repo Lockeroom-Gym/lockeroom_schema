@@ -41,10 +41,26 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `membership_versions` | Historical pricing and policy snapshots |
 | `member_physicals_raw` | Physical assessment data — movement screen, benchmarks, focus/avoid fields. One row per assessment. |
 | `member_health_metrics` | InBody body composition scans — weight, bf, smm, inbody_score, date_created. |
+| `member_referral_tracker` | Current per-member referral workflow state for Coach OS Member Health referral view. |
+| `member_referral_log` | Historical referral touchpoint events. |
+| `member_referral_touchpoint` | Existing referral touchpoint context and ongoing notes. |
+| `member_session_bookings` | Member app forward session reservations against `schedule_sessions` |
+| `member_booking_credit_ledger` | Append-only booking credit movements (perform / vo2 / box) |
+| `booking_policy_config` | Member booking cancellation and waitlist policy |
+| `booking_peak_windows` | Peak time windows per gym for off-peak booking rules |
+| `schedule_session_booking_counts` | Live booked/waitlist counts per session (Realtime) |
 
 ---
 
 ## Critical Business Rules
+
+### Financial / package data
+Never infer session credits from `member_memberships` alone. Prefer **`membership_types`** via `member_memberships.membership_type_id`. Metadata (`member_newsale_metadata`, `member_renewal_meta`) is a sale-time snapshot — unreliable on secondaries.
+
+### Member app booking
+- Forward reservations: **`member_session_bookings`** (not `member_batch_attendance.booked`, which is retrospective attendance rollup).
+- Credit pools: **`perform`** (master), **`vo2`**, **`box`** — VO2/Box often come from secondary membership rows.
+- Writes: member app uses security-definer RPCs only (`book_session`, `cancel_booking`).
 
 ### Active Member Count
 ```sql
@@ -77,6 +93,29 @@ Active coach = coach_id
 - `handoff_coach_id` = who was actually handling them at time of churn
 - Renewal points → `handoff_coach_id` if set, else `coach_id`
 
+### Sprint and Review Cycle Definitions
+- Sprint 1 = November-January
+- Sprint 2 = February-April
+- Sprint 3 = May-July
+- Sprint 4 = August-October
+- Review Cycle 1 = Sprint 1 + Sprint 2, November-April
+- Review Cycle 2 = Sprint 3 + Sprint 4, May-October
+
+### Performance Review Metrics
+- These metrics are reported by clients owned by coach, not by `renewal_assignee`.
+- Default coach ownership is `COALESCE(handoff_coach_id, coach_id)`. Use this unless a metric explicitly says direct `coach_id` only.
+- Total possible renewals: count distinct primary memberships where `end_date` falls inside the review cycle. Exclude test accounts. Attribute to `COALESCE(handoff_coach_id, coach_id)`.
+- No sales: count primary memberships where `journey_stage = 'no_sale'` in the review cycle. Attribute to `COALESCE(handoff_coach_id, coach_id)`. Use a consistent outcome/date column for the report; if no explicit no-sale date exists, use `created_at`.
+- Not renewing vs expired: export as separate columns. **Not renewing total**: `journey_stage = 'not_renewing'`, outcome date from `COALESCE(member_not_renewing.confirmation_date, member_not_renewing.expiry_date, end_date)` with `member_not_renewing.membership_id` → `member_memberships.id`. **Expired**: lapsed in period (`end_date` in window, `end_date < CURRENT_DATE`, no later primary membership) and `journey_stage IS DISTINCT FROM 'not_renewing'`.
+- Churn buckets (pipeline): `pipeline_lost` is `good_churn` | `bad_churn` | null. **Good churn**: `pipeline_lost = 'good_churn'` (and/or `member_not_renewing.good_bad = 'good'`). **Bad churn**: performance rules in architecture digest. **Unmarked**: leaver cohort with `pipeline_lost IS NULL`. **Try**: confirm ops meaning; see `lockeroom-performancereviewreport` skill.
+- Bad churn %: `bad_churn / direct_coach_possible_renewals`. The denominator uses direct `coach_id` only and excludes memberships with `handoff_coach_id IS NOT NULL`.
+- Renewals completed: count completed renewal memberships in the review cycle. A renewal is any membership after the member's earliest `start_date`.
+- Renewal percentage: `renewals_completed / active_owner_possible_renewals`. The denominator includes handoff ownership using `COALESCE(handoff_coach_id, coach_id)`.
+- Session balance: use `view_coach_session_balance_sep25`, summarized across weeks inside the review cycle.
+- Winning client results (WCR): sum `coach_wcr_logging.points_logged` where `submission_date` falls in the review cycle.
+- WCR points total: sum all-time points from `coach_wcr_logging`.
+- Renewal duration points / renewal points: sum `member_renewal_meta.renewal_duration_points` for completed renewals in the review cycle. Attribute to `handoff_coach_id` when present; otherwise to `coach_id`. If `handoff_coach_id IS NOT NULL`, do not count those points for the original `coach_id`.
+
 ### Primary vs Secondary Memberships & Session Counting
 - **Secondary Membership:** Identified by `primary_membership_id IS NOT NULL` in `member_memberships`. The `primary_membership_id` points to the core membership.
 - **Session Credits:** To get the total session credits for a member, you must sum the `session_credits` from BOTH the primary membership and any connected secondary memberships.
@@ -98,6 +137,12 @@ Active coach = coach_id
 ### Coach Hours — Never Hardcode
 - Per-client allocations → always query `work_estimations.per_client_allocation`
 - Session durations and FTE/PTE hours → always query `system_config.duration`
+
+### Referral Tracking
+- Referral tracker UI uses the same Member Health/RPI cohort but stores editable current workflow state in `member_referral_tracker`.
+- Historical referral context belongs in `member_referral_log` / `member_referral_touchpoint`; do not use those as the current-state dashboard row.
+- Staff RBAC: `view_churn_reports` + `view_referrals` for read access, `manage_referrals` for editable owner/date/lead/note fields.
+- Member portal users must not read internal churn/referral tracker tables. Create a narrow member-portal view if referral info is ever exposed to members.
 
 ---
 

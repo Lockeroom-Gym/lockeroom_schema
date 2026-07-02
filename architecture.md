@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-04-13
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-07-02
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -21,6 +21,8 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 10. [Key Views](#10-key-views)
 11. [FK Relationship Map](#11-fk-relationship-map)
 12. [Assessments & Health Data](#12-assessments--health-data)
+13. [Referral Tracking](#13-referral-tracking)
+14. [Member App Session Booking](#14-member-app-session-booking)
 
 ---
 
@@ -38,6 +40,8 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | **Role semantics** | `role` = primary title / seniority line; `supplementary_roles` = `text[]` extra hats (non–tenure-track, operational extras) |
 | **Personality / PV** | Narrative + **`personality` text** live in **`staff_personal_vision`** (per `staff_id`), not on `staff_database`. Optional numeric **`style_*`** ints on `staff_database` are separate coaching-style dimensions |
 | **1:1 / HR notes** | Manager ↔ direct report check-ins: **`hr_direct_report`** (`manager_id`, `coach_id` = report), one row per submission (~weekly); not member data |
+| **Session credits (catalog)** | **`membership_types.session_frequency_per_week`** / **`session_total`** are the product index. Usage views and member-app booking prefer these via **`member_memberships.membership_type_id`**. Sale/renewal metadata is a point-in-time snapshot only — especially unreliable on secondaries. |
+| **Forward bookings** | **`member_session_bookings`** (member app, `ma_` migrations) is the live reservation ledger against **`schedule_sessions`**. Do not confuse with **`member_batch_attendance.booked`**, which is a retrospective weekly rollup metric. |
 
 ---
 
@@ -161,6 +165,30 @@ The central table. Each row represents one membership term. A member can have mu
 - Active coach = `coach_id` UNLESS `handoff_coach_id IS NOT NULL` → handoff coach takes the assignment
 - Not-renewing attribution: if a handed-off client goes to not renewing, the `member_not_renewing` record attributes to the **original `coach_id`**, not the handoff coach
 - Renewal points: awarded to `handoff_coach_id` if not null, otherwise default to `coach_id`
+
+**Sprint and review cycle definitions:**
+- Sprint 1 = November-January
+- Sprint 2 = February-April
+- Sprint 3 = May-July
+- Sprint 4 = August-October
+- Review Cycle 1 = Sprint 1 + Sprint 2, November-April
+- Review Cycle 2 = Sprint 3 + Sprint 4, May-October
+
+**Performance review metrics:**
+- These metrics are reported by clients owned by coach, not by `renewal_assignee`.
+- Default coach ownership is `COALESCE(handoff_coach_id, coach_id)`. Use this active-owner rule unless a metric explicitly says direct `coach_id` only.
+- Total possible renewals: count distinct primary memberships where `end_date` falls inside the review cycle. Exclude test accounts. Attribute to `COALESCE(handoff_coach_id, coach_id)`.
+- No sales: count primary memberships where `journey_stage = 'no_sale'` in the review cycle. Attribute to `COALESCE(handoff_coach_id, coach_id)`. Use a consistent outcome/date column for the report; if no explicit no-sale date exists, use `created_at`.
+- Not renewing vs expired: export as separate columns. **Not renewing total**: `journey_stage = 'not_renewing'`, outcome date from `COALESCE(member_not_renewing.confirmation_date, member_not_renewing.expiry_date, end_date)` with `member_not_renewing.membership_id` → `member_memberships.id`. **Expired**: lapsed in period (`end_date` in window, `end_date < CURRENT_DATE`, no later primary membership) and `journey_stage IS DISTINCT FROM 'not_renewing'` so they are not merged as `expired_or_not_renewing`.
+- Churn buckets (pipeline): `pipeline_lost` is `good_churn` | `bad_churn` | null. **Good churn**: `pipeline_lost = 'good_churn'` (and/or reconcile `member_not_renewing.good_bad = 'good'`). **Bad churn**: performance rules below. **Unmarked**: leaver cohort with `pipeline_lost IS NULL`. **Try**: confirm ops meaning (e.g. attempt-to-save); see `lockeroom-performancereviewreport` skill.
+- Bad churn (performance): count primary memberships in the review cycle where `journey_stage = 'not_renewing'` and either `pipeline_lost = 'bad_churn'` or the membership is expired and is not explicitly marked `pipeline_lost = 'good_churn'`.
+- Bad churn %: `bad_churn / direct_coach_possible_renewals`. The denominator uses direct `coach_id` only and excludes memberships with `handoff_coach_id IS NOT NULL`; handed-off clients should not increase the original coach's bad-churn denominator.
+- Renewals completed: count completed renewal memberships in the review cycle. A renewal is any membership after the member's earliest `start_date`.
+- Renewal percentage: `renewals_completed / active_owner_possible_renewals`. The denominator includes handoff ownership using `COALESCE(handoff_coach_id, coach_id)`, so it can be higher than the bad-churn denominator.
+- Session balance: use `view_coach_session_balance_sep25`, summarized across weeks inside the review cycle. Do not hardcode expected session values.
+- Winning client results (WCR): sum `coach_wcr_logging.points_logged` where `submission_date` falls inside the review cycle (sheet column may be `winning_client_results_points`).
+- WCR points total: sum all-time points from `coach_wcr_logging`.
+- Renewal duration points / renewal points: sum `member_renewal_meta.renewal_duration_points` for completed renewals in the review cycle. Attribute to `handoff_coach_id` when present; otherwise to `coach_id`. If `handoff_coach_id IS NOT NULL`, do not count those points for the original `coach_id`.
 
 **`pipeline_lost` — business rules:**
 
@@ -338,7 +366,7 @@ Weekly attendance rollup per member. **THIS IS A VIEW** — not a base table. Re
 | `member_name` | text | Denormalized |
 | `date` | date | Week start date (Monday), derived via `DATE_TRUNC('week', session_date)` |
 | `sessions_attended` | integer | Count of rows in `member_daily_sessions_attended` for this member-week |
-| `booked` | integer | Derived: `sessions_attended + late_cancel + no_shows`. No live bookings table exists — see note below |
+| `booked` | integer | Derived retrospective metric: `sessions_attended + late_cancel + no_shows`. **Not** sourced from `member_session_bookings` — see notes below |
 | `late_cancel` | integer | Sourced from `member_lcns.late_cancel`, aggregated to week |
 | `no_shows` | integer | Sourced from `member_lcns.no_show`, aggregated to week |
 | `last_visit_date` | date | `MAX(session_date)` for this member-week |
@@ -346,7 +374,9 @@ Weekly attendance rollup per member. **THIS IS A VIEW** — not a base table. Re
 
 **Source tables:** `member_daily_sessions_attended` (attendance rows) + `member_lcns` (late cancel / no show rows).
 
-**Important — `booked` column:** There is no forward-looking bookings table in Supabase. `member_priority_booking` stores recurring booking templates (day-of-week patterns), not individual session-level bookings. Therefore `booked = sessions_attended + late_cancel + no_shows`. This is derived, not sourced from a live bookings feed. It is behaviourally sound for ratio calculations: "of everything they were supposed to show up for, how often did they bail?"
+**Important — `booked` column:** This is a **retrospective** weekly attendance metric, not forward-looking session reservations. `member_priority_booking` stores recurring booking templates (day-of-week patterns), not individual session-level bookings. Therefore `booked = sessions_attended + late_cancel + no_shows` in this view.
+
+**Forward bookings (member app):** Live session reservations live in **`member_session_bookings`** (see [§14 Member App Session Booking](#14-member-app-session-booking)). That table is separate from this view and does not feed `member_batch_attendance.booked`.
 
 **History:** Prior to April 2026 this was a base table populated by an external sync job. That job stopped running in August 2025, leaving the table stale (341 rows, last data July 31 2025). The table was dropped and replaced with this live view on April 11 2026. The view has identical column names and types to the original table so existing queries are unaffected.
 
@@ -551,8 +581,8 @@ Defines the category/product level of a membership.
 |--------|------|-------|
 | `id` | uuid | PK |
 | `name` | text | Membership category name |
-| `session_frequency_per_week` | integer | |
-| `session_total` | integer | |
+| `session_frequency_per_week` | integer | Weekly session entitlement for recurring memberships (e.g. Perform x2 → 2). Used by usage views and member-app booking when the product is weekly, not a pack. |
+| `session_total` | integer | Total session pool for pack products and online coaching. Program-only online coaching = **0**. Fixed-term OC session products may use months × sessions/month (e.g. 6). Rolling monthly OC may be null on the catalog — booking falls back to metadata or contract-span weeks. |
 | `category` | USER-DEFINED (enum) | |
 | `tod_category` | USER-DEFINED (enum) | Time-of-day category |
 | `sort_order` | integer | |
@@ -674,6 +704,11 @@ staff_database
 
 membership_types
   └── id ←── membership_versions.membership_type_id
+  └── id ←── member_memberships.membership_type_id
+
+schedule_sessions
+  └── id ←── member_session_bookings.session_id
+  └── id ←── schedule_session_booking_counts.session_id
 ```
 
 ---
@@ -720,6 +755,38 @@ Stores raw physical assessment data captured at each screening (movement screen,
 
 ---
 
+## 13. Referral Tracking
+
+### `member_referral_tracker`
+Current referral workflow state per member for the Coach OS Member Health referral view. One row per `member_id`; this is the editable dashboard state, not the historical audit log.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id`; unique |
+| `referral_owner_id` | uuid | FK → `staff_database.id`; active staff member responsible for the referral workflow |
+| `offer_discussed_at` | date | First referral offer discussion date |
+| `second_followup_at` | date | Second follow-up completion date |
+| `third_followup_at` | date | Third follow-up completion date |
+| `lead_status` | text | `none`, `lead`, `converted`, `not_now` |
+| `do_not_contact` | boolean | Suppresses referral outreach |
+| `notes` | text | Current tracker notes |
+| `created_at` / `updated_at` | timestamptz | Audit timestamps |
+
+### Historical Referral Context
+
+- `member_referral_log` stores historical referral touchpoint events (`touchpoint_type`, date, staff, notes).
+- `member_referral_touchpoint` stores existing Retool-style referral touchpoint context and ongoing notes.
+- `v_member_referral_dashboard` joins `member_churn_risk`, member/membership context, active staff names, current tracker state, and latest historical touchpoint context for Coach OS.
+
+### Referral RLS / RBAC
+
+- Referral tracking is **staff-only**. Do not expose `member_referral_tracker`, `member_referral_log`, `member_referral_touchpoint`, or `v_member_referral_dashboard` to member portal sessions.
+- `view_churn_reports` gates the base Member Health/RPI cohort.
+- `view_referrals` allows staff to read referral tracker/context.
+- `manage_referrals` allows staff to insert/update owner, follow-up dates, lead state, and notes.
+- If a future member-facing referral surface is needed, create a narrow `member_portal_referrals` view with member-scoped RLS instead of reusing the staff dashboard tables.
+
 ### `member_health_metrics`
 InBody body composition scan results. One row per scan per member.
 
@@ -734,6 +801,45 @@ InBody body composition scan results. One row per scan per member.
 | `date_created` | timestamptz | Scan date — order DESC and take latest for current metrics |
 
 > **Display convention:** In the Programming Engine Intake page, `bf` is shown as "Body Fat %", `smm` is shown as "Muscle Mass", and `date_created` is shown as "Scan Date".
+
+---
+
+## 14. Member App Session Booking
+
+Member-facing session booking (Wellness Living replacement). Migrations live in **`lrmemberapp-app`** with `ma_` prefix; supply still comes from CoachOS **`schedule_sessions`**.
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `member_session_bookings` | One row per member reservation against a `schedule_sessions` row. Statuses: `booked`, `waitlisted`, `cancelled`, `late_cancelled`, `no_show`, `attended`. At most one live (`booked`/`waitlisted`) row per member per session. |
+| `member_booking_credit_ledger` | Append-only credit movements (`perform`, `vo2`, `box`). Balances are derived — never stored. |
+| `booking_policy_config` | Cancellation notice rules, waitlist capacity, booking window. `gym NULL` = default; gym-specific active row overrides. |
+| `booking_peak_windows` | Peak time ranges per gym. Off-peak members cannot book inside peak windows. |
+| `schedule_session_booking_counts` | Trigger-maintained booked/waitlist counts per session for Realtime UI. |
+
+### Credit entitlement source (canonical order)
+
+1. **`membership_types`** via **`member_memberships.membership_type_id`** — `session_frequency_per_week` (weekly products) or `session_total` (packs / online coaching).
+2. **`member_renewal_meta.total_sessions`** / **`member_newsale_metadata.total_sessions`** — fallback when type columns are null/zero.
+3. **Online coaching contract span** — `floor(contract_days / 7) × session_frequency_per_week` when both type and metadata are missing (rolling monthly OC).
+
+Secondaries (VO2, Box) must use **their own** `membership_type_id`, not the primary's renewal metadata. Usage views follow the same rule (`view_member_membership_usage` / pack usage migrations from 2026-05).
+
+### Member RPCs (authenticated; writes are RPC-only)
+
+| RPC | Purpose |
+|-----|---------|
+| `get_member_schedule(p_from, p_to)` | Published sessions with spots, peak flag, own booking status, cancel deadline |
+| `get_member_booking_credits(p_on_date)` | Perform / VO2 / Box entitlement and balance |
+| `book_session(p_session_id, p_join_waitlist)` | Book or join waitlist |
+| `cancel_booking(p_booking_id)` | Cancel own booking; may promote waitlist |
+
+### Peak / off-peak
+
+- Peak = session start time falls inside any active `booking_peak_windows` row for that gym.
+- **`membership_types.tod_category = 'on_peak'`** → may book any published session.
+- **`tod_category = 'off_peak'`** → may book only **outside** peak windows.
 
 ---
 

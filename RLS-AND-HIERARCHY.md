@@ -177,12 +177,14 @@ Each permission is a **capability**, not a page. `verb_noun` naming (with one ex
 
 > **Implication semantics.** `biomap_access` is enforced at the RLS layer (SELECT) on every biomap object. The three `edit_*` permissions add INSERT/UPDATE rights on top. A user with `edit_biomap_paid` but not `biomap_access` would in theory see no rows to edit — which is fine, because in practice every role that gets any `edit_*biomap*` permission is also granted `biomap_access`.
 
-### Revenue & Renewals / Module A (2)
+### Revenue & Renewals / Module A (4)
 
 | Permission | Maps from today |
 |---|---|
 | `view_financial_reports` | `executive=true` OR `role IN ('CEO','CRO','Gym Manager','Marketing Manager','Admin','Head of Tech & Operations')` OR `'revenue_team' = ANY(supplementary_roles)`. |
 | `manage_renewals` | `role IN ('Coach','Advanced Coach','Senior Coach','Head Boxing Coach','Gym Manager','Marketing Manager','Admin','Head of Tech & Operations')` OR `'revenue_team' = ANY(supplementary_roles)` OR `executive=true`. |
+| `view_referrals` | Read referral tracker rows and referral journey context on Coach OS Member Health. Suggested: coaches through management roles plus `module_revenue`, excluding member portal users. |
+| `manage_referrals` | Edit referral owner, outreach dates, lead state, and tracker notes. Suggested: `Advanced Coach`, `Senior Coach`, `Head Boxing Coach`, `Gym Manager`, `Admin`, `Head of Tech & Operations`, `Executive`, and `module_revenue`; not regular Coach unless explicitly delegated. |
 
 ### Calls & Accountability (3)
 
@@ -205,7 +207,7 @@ Each permission is a **capability**, not a page. `verb_noun` naming (with one ex
 |---|---|
 | `manage_facilities` | `role IN ('Cleaning','Maintenance','Gym Manager','Admin','Head of Tech & Operations')` OR `executive=true`. |
 
-**Total: 25 permissions** (4 admin + 6 programming + 2 scheduling + 3 member-data + 4 biomap/medical + 2 financial + 3 calls + 2 reporting + 1 facilities = 27 listed; `manage_system` and `view_staff` overlap-counted gives 25 distinct slugs).
+**Total: 27+ permissions** after adding referral tracking (`view_referrals`, `manage_referrals`). Treat these as staff-only capabilities layered on top of `view_churn_reports`, not member portal permissions.
 
 ---
 

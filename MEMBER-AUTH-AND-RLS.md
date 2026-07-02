@@ -128,6 +128,12 @@ The staff RBAC document correctly focuses on **Coach OS** and **`staff_database.
 
 - Operational data is keyed by **`member_id`** on many tables, but **`member_database` has no `auth_id` column** in the inspected schema — there is nothing to anchor RLS to `auth.uid()` for members without a new link layer.
 
+### 3.1a Referral tracking is staff-only
+
+- Coach OS referral tracking uses the Member Health/RPI cohort and internal staff context. It should live behind staff RBAC (`view_churn_reports` + `view_referrals` for reads, `manage_referrals` for writes).
+- `member_referral_tracker`, `member_referral_log`, `member_referral_touchpoint`, and `v_member_referral_dashboard` are **not** member portal objects. Do not add member-facing `SELECT` policies for them in the read-only v1 member app.
+- If members need referral information later, create a narrow `member_portal_referrals` projection with explicit columns and its own member-scoped RLS rather than exposing Coach OS tracker tables.
+
 ### 3.2 `authenticated` is not “staff”
 
 - Coach OS `ProtectedRoute` only checks **any** Supabase session. A member JWT would also pass a naive client guard — **authorization must be enforced in Postgres (RLS)** and in app bootstrap (member app must require a linked member account).
@@ -257,7 +263,7 @@ Use **`security_invoker = true`** (Postgres 15+) so RLS on base tables applies c
 
 Block or omit entirely:
 
-- `member_coach_notes`, `member_programming_notes`, internal churn tables, `member_churn_risk*`, call accountability views, financial reporting tables, full `staff_database`, HubSpot sync tables, etc.
+- `member_coach_notes`, `member_programming_notes`, internal churn tables, `member_churn_risk*`, `member_referral_tracker`, `member_referral_log`, `member_referral_touchpoint`, `v_member_referral_dashboard`, call accountability views, financial reporting tables, full `staff_database`, HubSpot sync tables, etc.
 
 ---
 
