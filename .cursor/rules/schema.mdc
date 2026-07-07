@@ -34,7 +34,7 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `member_holds` | Membership pauses |
 | `member_daily_sessions_attended` | Actual session attendance |
 | `member_lcns` | Late cancels and no-shows |
-| `staff_database` | All staff, coaches, and roles |
+| `staff_database` | All staff, coaches, and roles. `staff_bio` + `avatar_path` (added 2026-07-07) are the canonical public profile fields exposed to LR Member App members via `get_staff_directory` only. |
 | `work_estimations` | Per-client hour allocations per role |
 | `system_config` | Session durations and contract hour baselines |
 | `membership_types` | Membership product definitions |
@@ -47,6 +47,12 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `member_health_activity_daily` | Steps/movement summaries by day. Use `input_kind`: `vendor_daily` vs `manual_checkin_weekly_avg` (member_checkins weekly average — label in UI). Not workouts. |
 | `member_health_workouts` | Discrete workout sessions (TeamBuilder, app, Terra `activity`). |
 | `member_health_connections` | Maps `member_id` to vendor health accounts (e.g. Terra `user_id`, `reference_id`, `provider`). |
+| `member_tbresults` | TeamBuilder raw lift logs — strength pipeline input. |
+| `exercise_library` | Exercise → `reporting_pattern`, `coefficient` (fraction of pattern benchmark), `per_limb`, `is_bodyweight`. |
+| `member_st_tracker_lifts` | Benchmark metadata only (manual coach rows kept); **not used by metrics math**. |
+| `member_st_metrics_daily` | Daily strength aggregates per member/pattern (pattern e-max smoothed, IV volume, tonnage, heavy sets). |
+
+**Strength model (2026-06-10):** UI headline = smoothed **raw** e-max of window’s most-trained lift (no coefficient), computed on-the-fly; `st_pattern_top_exercise_series` for detail chart. `member_st_metrics_daily` still stores coefficient-indexed pattern e-max for IV/heavy baselines. `calculate_e_max` NULL when reps > 12. Sufficiency = ≥3 days on chosen top exercise. `calculate_pattern_state` returns `top_exercise_name` + `sessions_in_window`. No auto-assign cron. See `architecture.md` §13.
 
 ---
 
@@ -108,6 +114,10 @@ Active coach = coach_id
 ### Coach Hours — Never Hardcode
 - Per-client allocations → always query `work_estimations.per_client_allocation`
 - Session durations and FTE/PTE hours → always query `system_config.duration`
+
+### Staff Profile Exposure to Members (LR Member App)
+- Members never read `staff_database` directly. Only `get_staff_directory(p_staff_id uuid default null)` (`SECURITY DEFINER`) exposes staff to the member app, and only `staff_id`, `display_name`, `role`, `staff_bio`, `lockeroom_email`, `avatar_path` for `staff_status = 'active'` rows.
+- Staff photos live in the `staff-avatars` Storage bucket, keyed by `staff_database.avatar_path` — separate from the member `member-avatars` bucket. Uploads happen via Coach OS / service role, not member-app RPCs.
 
 ---
 

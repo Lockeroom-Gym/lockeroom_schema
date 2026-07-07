@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-06-18
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-07-07
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -22,6 +22,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 11. [FK Relationship Map](#11-fk-relationship-map)
 12. [Assessments & Health Data](#12-assessments--health-data)
 13. [Renewal Tracker (Coach OS)](#13-renewal-tracker-coach-os)
+14. [Member Strength Metrics](#14-member-strength-metrics)
 
 ---
 
@@ -43,6 +44,7 @@ Reference for humans and **LLM agents**: table/column semantics, join spine, and
 | **Nutrition targets** | **`member_nutrition_targets`** — one current row per member (coach-managed). Logged intake (Terra/Phenomena) is separate; weight trend from **`member_health_metrics`** |
 | **Renewal Tracker reads** | Coach OS `/management/renewal-tracker` — primary grid: **`view_renewal_tracker_memberships`**; Financials margin: **`view_membership_costs_with_lead`** (not raw `view_membership_costs`); VO2 sales: **`view_thirty_day_vo2_memberships`** (90-day load; UI filters 30/60/90) |
 | **Margin % storage** | **`view_membership_costs.margin_percent`** is a **0–1 ratio** (e.g. `0.5` = 50%). Multiply by 100 for display. Weighted headline margin = `SUM(margin) ÷ SUM(membership_value_ex_gst)` |
+| **Strength pattern e-max** | Headline = smoothed raw e-max of window’s most-trained lift (no coefficient); daily table still uses coefficients for volume; sufficiency = ≥3 days on that lift; rep cap 12 (§14) |
 
 ---
 
@@ -381,11 +383,54 @@ Weekly attendance rollup per member. **THIS IS A VIEW** — not a base table. Re
 
 **Source tables:** `member_daily_sessions_attended` (attendance rows) + `member_lcns` (late cancel / no show rows).
 
-**Important — `booked` column:** There is no forward-looking bookings table in Supabase. `member_priority_booking` stores recurring booking templates (day-of-week patterns), not individual session-level bookings. Therefore `booked = sessions_attended + late_cancel + no_shows`. This is derived, not sourced from a live bookings feed. It is behaviourally sound for ratio calculations: "of everything they were supposed to show up for, how often did they bail?"
+**Important — `booked` column:** This view still derives `booked = sessions_attended + late_cancel + no_shows` from `member_daily_sessions_attended` and `member_lcns`; it does **not** read `member_session_bookings` (added 2026-07, see below) and has not been backfilled to do so. `member_priority_booking` stores recurring booking templates (day-of-week patterns), not individual session-level bookings. It is behaviourally sound for ratio calculations: "of everything they were supposed to show up for, how often did they bail?" — but do not assume it reflects live member-app booking counts.
 
 **History:** Prior to April 2026 this was a base table populated by an external sync job. That job stopped running in August 2025, leaving the table stale (341 rows, last data July 31 2025). The table was dropped and replaced with this live view on April 11 2026. The view has identical column names and types to the original table so existing queries are unaffected.
 
 **Query note:** The view recomputes on every query from the base tables. For high-volume or repeated aggregation use cases, query `member_daily_sessions_attended` and `member_lcns` directly to avoid double-aggregation overhead.
+
+### `member_session_bookings` (member app, added 2026-07)
+Demand-side booking ledger for the native in-app booking module (lrmemberapp-app). One row per member per session attempt.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `session_id` | uuid | FK → `schedule_sessions.id` |
+| `member_id` | uuid | FK → `member_database.id` |
+| `membership_id` | uuid | FK → `member_memberships.id`, nullable |
+| `status` | text | `booked` \| `waitlisted` \| `cancelled` \| `late_cancelled` \| `no_show` \| `attended` |
+| `credit_type` | text | `perform` \| `vo2` \| `box` — which entitlement pool the booking consumed |
+| `waitlist_position` | integer | |
+| `booked_at` / `cancelled_at` / `promoted_at` | timestamptz | |
+| `credit_returned` | boolean | Set on cancellation: true = credit returned (on-time), false = retained (late cancel / no-show) |
+
+At most one **live** row (`booked`/`waitlisted`) per `(session_id, member_id)`. All member writes go through `book_session` / `cancel_booking` RPCs — no direct insert/update grants. This is a member-app-owned table (not written by CoachOS); `schedule_session_booking_counts` is the safe Realtime-enabled counts table for cross-app seat display. Migration: `lrmemberapp-app/supabase/migrations/20260702103000_ma_booking_tables.sql`.
+
+### `member_session_feedback` (member app, added 2026-07)
+Optional per-session feedback submitted by the member from the app (coach, free text, 0-5 rating). One row per member per past session; linked to exactly one of `booking_id` (→ `member_session_bookings.id`) or `attendance_id` (→ `member_daily_sessions_attended.id`), never both. Requires `rating` and/or `feedback_text`.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `member_id` | uuid | FK → `member_database.id` |
+| `booking_id` | uuid | FK → `member_session_bookings.id`, mutually exclusive with `attendance_id` |
+| `attendance_id` | uuid | FK → `member_daily_sessions_attended.id`, mutually exclusive with `booking_id` |
+| `coach_id` | uuid | FK → `staff_database.id`; only settable when the session has resolvable session coaches (booking-sourced) |
+| `rating` | smallint | `0..5`, optional |
+| `feedback_text` | text | optional |
+| `submitted_at` | timestamptz | |
+
+Unique on `(member_id, coalesce(booking_id, attendance_id))`. Members have direct `SELECT` on their own rows only (RLS via `current_member_ids()`); all writes go through `upsert_member_session_feedback`. Migration: `lrmemberapp-app/supabase/migrations/20260707170000_ma_session_history_feedback.sql`.
+
+### Member app session history reconciliation
+`get_member_session_history(p_limit, p_before)` (member app, `SECURITY DEFINER`) is the canonical merge of the three sources above into one member-facing timeline, conservative by design for v1:
+
+1. A `member_session_bookings` row wins whenever a booking's `schedule_sessions.session_date`/`session_time`/`gym` matches a `member_daily_sessions_attended` or `member_lcns` row for the same member — the booking is shown, the matching attendance/LCN row is suppressed to avoid double-counting.
+2. Unmatched `member_daily_sessions_attended` rows still surface as confirmed attendance (visits that predate or bypass the booking module).
+3. Unmatched `member_lcns` rows surface as terminal late-cancel/no-show events.
+4. Coach identity is only resolved via `staff_database` FK (`schedule_session_coaches` for bookings, `member_lcns.coach_id` for LCN rows); `member_daily_sessions_attended.coach_name` is free text with no FK, so attendance-sourced rows cannot carry a `coach_id` feedback selection.
+
+Any future nightly reconciliation job that backfills `session_id`/`coach_id` onto `member_daily_sessions_attended` should preserve this RPC's return shape rather than requiring a member-app contract change. See `lrmemberapp-app/docs/functional/session-history-and-feedback.md` for the full app-side flow.
 
 ---
 
@@ -434,6 +479,10 @@ All staff profiles — coaches, admin, leadership. **Foreign-key hub:** most `co
 | `client_drive_link` / `workbook_id` / `clientworkbook_links` / `raw_data_code` / `roles_ldp` | text | Ops / workbook links |
 | `auth_id` | uuid | Auth user link when set |
 | `updated_at` | timestamptz | |
+| `staff_bio` | text | Public mini-bio (added 2026-07-07). Shown to LR Member App members via `get_staff_directory` |
+| `avatar_path` | text | Canonical staff photo path (added 2026-07-07). Storage bucket `staff-avatars`; resolved via `get_staff_directory` |
+
+**Member-facing staff profile (LR Member App, 2026-07-07):** `staff_bio` and `avatar_path` are the canonical public profile fields for the Member Directory "Staff" bucket and the booking instructor profile screen. Exposed member-side only through the `SECURITY DEFINER` RPC `get_staff_directory(p_staff_id uuid default null)`, which returns `staff_id`, `display_name`, `role`, `staff_bio`, `lockeroom_email`, `avatar_path` for `staff_status = 'active'` rows — no other `staff_database` columns are exposed to members. See LR Member App `docs/functional/member-directory.md` for the app-side contract.
 
 ### `staff_personal_vision`
 One row per staff member (join `staff_id` → `staff_database.id`). **Personal vision / HR context:** goals, motivations, appreciation languages, work–life, and **`personality`** (free text). Updated over time; use `submission_date` / `updated_at` for “latest” semantics.
@@ -991,6 +1040,7 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 
 ---
 
+
 ## 13. Renewal Tracker (Coach OS)
 
 Coach OS route: `/management/renewal-tracker`. Read views are `security_invoker`; writes use RPCs gated by `can_manage_renewal_tracker()`.
@@ -1062,6 +1112,60 @@ Aggregated hold-credit totals per active membership for the Hold Credits tab.
 
 ---
 
+## 14. Member Strength Metrics
+
+TeamBuilder lift logs drive movement-pattern strength tiles in the LR Member App (`/strength`).
+
+### Pipeline (per-exercise headline e-max, 2026-06-10)
+
+1. **`member_tbresults`** — raw sets (exercise name, load, reps, `completed_date`, `member_id`).
+2. **`exercise_library`** — maps exercise name → `reporting_pattern`, `coefficient` (fraction of pattern benchmark, 1.00 = benchmark), `per_limb`, `is_bodyweight`.
+3. **`member_st_metrics_daily`** — daily aggregates per member/pattern/day (coefficient-indexed pattern e-max for volume baselines, IV volume, heavy sets, kg tonnage). Maintained by `st_write_daily_metrics` via trigger on `member_tbresults`.
+4. **`calculate_pattern_state(member_id, pattern, window_days)`** — headline e-max, trend, sufficiency, `top_exercise_name` (computed on-the-fly from `member_tbresults`).
+5. **`st_pattern_top_exercise_series(member_id, pattern, window_days)`** — daily raw + smoothed e-max for the window’s top exercise (detail chart).
+
+### Headline e-max (UI bricks / hero)
+
+- Pick the **most-trained mapped exercise** in the window (most distinct `completed_date` days; tie-break most recent day). If that exercise has no scoreable e-max sets, use the next most-trained exercise that does (`st_pick_window_top_exercise`).
+- Per training day on that exercise: best **raw** `calculate_e_max(effective_load, reps)` (no coefficient).
+- Smooth across those days in window order: `new = 0.4 * today_best + 0.6 * previous_smoothed`.
+- `tracker_e_max` = last smoothed value; trend = `(last − first) / first` on that series.
+- `calculate_e_max(load, reps)` returns NULL when `reps > 12` (cap raised from 8 on 2026-06-10).
+
+### Daily pattern metrics (`member_st_metrics_daily`)
+
+- For each training day and pattern, stored e-max = **best coefficient-adjusted e-max across ALL mapped lifts** logged that day: `max(calculate_e_max(effective_load, reps) * coefficient)`. Used for IV volume / heavy-set baselines, **not** the UI headline.
+- Smoothing: `new = 0.4 * today_best + 0.6 * previous_smoothed`.
+- Heavy set: coefficient-adjusted set load ≥ **0.75** of the smoothed baseline.
+- NULL-coefficient rows are skipped in load math.
+- `member_st_tracker_lifts` (manual rows only) and `exercise_library.is_tracker_default` remain as **benchmark metadata only**; the nightly auto-assign job and `st_auto_assign_*` / `st_backfill_tracker_assignments_batch` functions were removed.
+
+### Library benchmarks (coefficient 1.00 reference per pattern)
+
+| Pattern | Benchmark exercise |
+|---------|--------------------|
+| `lower_body_push` | Squat - Back - Barbell - High Bar (Squat - Pendulum 0.95 is the `is_tracker_default` seed) |
+| `lower_body_pull` | Trap-bar / conventional deadlift (Leg Curl - Seated 0.48 is the seed) |
+| `horizontal_press` | Press - Flat - Barbell - Medium Grip |
+| `horizontal_pull` | Row - Seated - Medium Grip - Neutral |
+| `vertical_press` | Press - 80 Degrees - Dumbbell |
+| `vertical_pull` | Pulldown - Medium Grip - Neutral |
+
+### Sufficiency
+
+- Trackable patterns: ≥3 distinct training days on the **chosen top exercise** in the window; otherwise `trend_state = 'insufficient_data'`.
+- `accessories` / `core` use an IV-volume-based trend instead of e-max.
+
+### Most-trained exercise
+
+`calculate_pattern_state` returns `top_exercise_name` and `sessions_in_window` (days on that exercise). Shown in the UI as `Most trained: {lift} · {sessions} sessions`. Detail e-max chart uses `st_pattern_top_exercise_series` so the series matches the headline exercise.
+
+### Coefficients
+
+`exercise_library.coefficient` scales effective load into benchmark equivalents for e-max/tonnage/IV/heavy sets. Conventions: 1-arm/1-leg variants ≈ half the bilateral value with `per_limb = true`; bodyweight movements set `is_bodyweight = true` (effective load = (BW + added) × coefficient; Push Up = BW × coefficient). Backfill applied 2026-06-10 — see LR Member App `docs/architecture/strength-coefficient-proposals.md` and migration `20260610170200_strength_exercise_library_pattern_backfill.sql`.
+
+---
+
 ## Appendix: General Query Rules
 
 1. **Never double-count members.** Always `COUNT(DISTINCT member_id)` when hand-rolling; for total active clients prefer `SELECT COUNT(*) FROM view_client_count_2025_master`.
@@ -1075,10 +1179,11 @@ Aggregated hold-credit totals per active membership for the Hold Credits tab.
 9. **`member_batch_attendance` is a view.** It recomputes live from `member_daily_sessions_attended` and `member_lcns`. Do not treat it as a cached or pre-aggregated table — it has no materialisation. For performance-sensitive queries over large date ranges, go to the base tables directly.
 10. **`renewal_assignee` vs `revenue_team_assignee`:** these are two different roles. `renewal_assignee` conducts the end-of-term renewal conversation. `revenue_team_assignee` handles the 3-month and 9-month check-in calls during the membership. Do not conflate them.
 11. **`margin_percent` is a ratio.** On `view_membership_costs` / `view_membership_costs_with_lead`, `margin_percent` is stored 0–1 (0.7 = 70%). For weighted portfolio margin use `SUM(margin) / SUM(membership_value_ex_gst)`, not `AVG(margin_percent)`.
-12. **Confirmed-leaving indicators (in order of certainty):**
+12. **`member_session_bookings` is not reflected in `member_batch_attendance` or its `booked` column.** The member app's native booking ledger (added 2026-07) is a separate demand-side table; reporting that needs live in-app booking counts should query `member_session_bookings` directly (or `schedule_session_booking_counts` for anonymised live seat counts), not the attendance view. See §6.
+13. **Confirmed-leaving indicators (in order of certainty):**
     1. `journey_stage = 'not_renewing'` — member has told Lockeroom they are leaving. Strongest signal.
     2. `end_date < CURRENT_DATE` AND no subsequent membership row — membership lapsed.
     3. `member_not_renewing` table record — churn has been formally logged with reason and metadata.
     `pipeline_lost`, `membership_notes`, and churn risk scores are predictive signals only — not confirmed outcomes.
-13. **Test accounts:** Exclude `member_database.test_account = true` from reporting and analytics (mirrors member-side rules).
-14. **Staff & HR:** Current roster → `staff_database.staff_status = 'active'`. **`role`** = primary title/seniority; **`supplementary_roles`** = extra non-rank duties. **`staff_personal_vision`** (join `staff_id`) holds **`personality`** and personal-vision fields. **`hr_direct_report`** = manager ↔ direct-report check-in rows (`manager_id`, `coach_id` = report), typically weekly cadence — not member data.
+14. **Test accounts:** Exclude `member_database.test_account = true` from reporting and analytics (mirrors member-side rules).
+15. **Staff & HR:** Current roster → `staff_database.staff_status = 'active'`. **`role`** = primary title/seniority; **`supplementary_roles`** = extra non-rank duties. **`staff_personal_vision`** (join `staff_id`) holds **`personality`** and personal-vision fields. **`hr_direct_report`** = manager ↔ direct-report check-in rows (`manager_id`, `coach_id` = report), typically weekly cadence — not member data.
