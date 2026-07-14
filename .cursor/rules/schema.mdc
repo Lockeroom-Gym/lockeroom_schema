@@ -51,8 +51,13 @@ This repo connects to the Lockeroom Supabase database. Always refer to `architec
 | `exercise_library` | Exercise → `reporting_pattern`, `coefficient` (fraction of pattern benchmark), `per_limb`, `is_bodyweight`. |
 | `member_st_tracker_lifts` | Benchmark metadata only (manual coach rows kept); **not used by metrics math**. |
 | `member_st_metrics_daily` | Daily strength aggregates per member/pattern (pattern e-max smoothed, IV volume, tonnage, heavy sets). |
+| `member_workout_history_sessions` | Permanent completed-strength workout snapshots across Member App, floor, and TeamBuildr. |
+| `member_workout_history_sets` | Permanent set facts and note snapshots for canonical workout sessions. |
+| `member_workout_exercise_daily` | Incremental member/exercise/day summaries derived from canonical sets. |
 
 **Strength model (2026-06-10):** UI headline = smoothed **raw** e-max of window’s most-trained lift (no coefficient), computed on-the-fly; `st_pattern_top_exercise_series` for detail chart. `member_st_metrics_daily` still stores coefficient-indexed pattern e-max for IV/heavy baselines. `calculate_e_max` NULL when reps > 12. Sufficiency = ≥3 days on chosen top exercise. `calculate_pattern_state` returns `top_exercise_name` + `sessions_in_window`. No auto-assign cron. See `architecture.md` §13.
+
+**Canonical workout history (2026-07-14):** completed strength only. Member App/floor sessions require a confirmed set and exclude auto-completion; TeamBuildr groups by `(member_id, completed_date)`. Program/title/set/note fields are snapshots and survive source-program deletion. App roles have member-scoped `SELECT` only; use the completion/projector functions for writes. See `architecture.md` §15.
 
 ---
 
