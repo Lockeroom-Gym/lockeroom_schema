@@ -1,6 +1,6 @@
 # Lockeroom — Supabase Schema Reference
 
-**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-07-07
+**Database:** PostgreSQL (Supabase) · **Project ID:** `dvrhazdtbsttzduaedzu` · **Updated:** 2026-07-12
 
 Reference for humans and **LLM agents**: table/column semantics, join spine, and non-obvious business rules. Prefer this file over guessing; use views when listed. **Token discipline:** one dense digest up front; detail sections stay factual and skippable if the digest suffices.
 
@@ -716,6 +716,7 @@ member_database
   ├── id ←── member_health_metrics.member_id
   ├── id ←── member_nutrition_targets.member_id
   ├── id ←── member_health_activity_daily.member_id
+  ├── id ←── member_health_sleep_daily.member_id
   ├── id ←── member_health_workouts.member_id
   ├── id ←── member_health_connections.member_id
   └── id ←── member_coach_notes.member_id
@@ -953,9 +954,27 @@ Aggregated movement/energy summary per member per **calendar day** (steps, optio
 | `source` | text | e.g. `member_checkin`, `terra` |
 | `provider` | text | Vendor when applicable |
 | `external_synced_at` | timestamptz | Optional |
+| `terra_ordering_ts` | bigint | Terra delivery ordering timestamp (Unix ms); older deliveries must not regress this row |
 | `created_at` | timestamptz | Row created in Lockeroom |
 
 > **Deduping:** Unique on `(member_id, activity_date, source, input_kind, coalesce(provider,''))`.
+
+---
+
+### `member_health_sleep_daily`
+Normalised Terra sleep episodes for member-facing nightly summaries. Rows use Terra `metadata.summary_id` as the stable external identity so naps and provider corrections are not collapsed into an unsafe date-only key.
+
+| Column group | Notes |
+|--------------|-------|
+| `member_id`, `sleep_date`, `source`, `provider`, `vendor_user_id` | Member/date/source identity; `source = 'terra'` in Phase 1 |
+| `summary_id`, `is_nap` | Terra episode identity and nap flag |
+| `duration_*_seconds` | Asleep, awake, deep, light, REM, and in-bed totals when provided |
+| `sleep_efficiency`, `sleep_score` | Optional Terra summary/enrichment values; null score updates do not erase a stored score |
+| `resting_hr_bpm`, `avg_hr_bpm`, `avg_hrv_rmssd` | Optional overnight cardiovascular summaries |
+| `terra_ordering_ts` | Terra delivery ordering timestamp (Unix ms); stale payloads are ignored |
+| `external_synced_at`, `created_at`, `updated_at` | Source and Lockeroom timestamps |
+
+Authenticated members can select only their own rows through `current_member_ids()` RLS. The Health overview selects the longest non-nap episode per date, displays the latest night, and averages up to seven dates.
 
 ---
 
@@ -1009,6 +1028,7 @@ Maps a Lockeroom member to a vendor account (Terra or other).
 | `provider` | text | Connection slug (e.g. `APPLE`, `GARMIN`) |
 | `scopes` | text | Granted scopes string as returned by Terra |
 | `active` | boolean | Connection usable |
+| `lifecycle_status` | text | `active`, `revoked`, or `error`; writers keep legacy `active` in sync |
 | `last_webhook_update` | timestamptz | Optional mirror of Terra `last_webhook_update` |
 | `created_at` / `updated_at` | timestamptz | Housekeeping |
 
@@ -1024,6 +1044,9 @@ Append-only (or idempotent upsert) store for webhook bodies before normalisation
 | `payload` | jsonb | Full JSON; include headers/metadata if useful for debugging |
 | `received_at` | timestamptz | Server receive time |
 | `idempotency_key` | text | Optional dedupe key (event id, hash, or Terra payload id) |
+| `terra_trace_id` | text | Unique `X-Terra-Trace-Id`; preferred delivery dedupe identity |
+| `terra_reference` | text | Correlation id shared across chunks; not unique |
+| `terra_ordering_ts` | bigint | `X-Terra-Ordering-Timestamp` Unix milliseconds |
 
 #### `terra_devices` (optional)
 Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `software_version`, etc.) if you need device-level reporting.
@@ -1035,7 +1058,7 @@ Device metadata from payloads (`manufacturer`, `name`, `serial_number`, `softwar
 | Body / `MeasurementDataSample` style measurements | `member_health_metrics` (set `source` appropriately, map units) |
 | Daily summary (steps, day HR summaries, scores) | `member_health_activity_daily` (`input_kind = vendor_daily`) |
 | Activity / workout session | `member_health_workouts` |
-| Sleep | Future `member_health_sleep_sessions` (document when implemented—not required for this revision) |
+| Sleep | `member_health_sleep_daily` (one row per Terra summary id; supports naps and corrections) |
 | High-frequency samples (HR streams, GPS points) | Future child tables; keep raw in `terra_events_raw` until needed |
 
 ---
@@ -1163,6 +1186,60 @@ TeamBuilder lift logs drive movement-pattern strength tiles in the LR Member App
 ### Coefficients
 
 `exercise_library.coefficient` scales effective load into benchmark equivalents for e-max/tonnage/IV/heavy sets. Conventions: 1-arm/1-leg variants ≈ half the bilateral value with `per_limb = true`; bodyweight movements set `is_bodyweight = true` (effective load = (BW + added) × coefficient; Push Up = BW × coefficient). Backfill applied 2026-06-10 — see LR Member App `docs/architecture/strength-coefficient-proposals.md` and migration `20260610170200_strength_exercise_library_pattern_backfill.sql`.
+
+---
+
+## 15. Canonical Workout History
+
+The LR Member App owns the migrations for the shared completed-strength history
+read model. It combines Member App, gym-floor, and legacy TeamBuildr logging
+without requiring member reads to aggregate operational lifetime data.
+
+### Tables
+
+| Table | Grain | Rule |
+|-------|-------|------|
+| `member_workout_history_sessions` | One member/source/source-session key | Completed workouts only; title, program, phase, totals, and exercise notes are permanent snapshots |
+| `member_workout_history_sets` | One source set within a canonical session | Prescribed/performed values, exercise identity, movement pattern, and set notes are snapshots |
+| `member_workout_exercise_daily` | Member/exercise key/workout date | Incrementally recomputed progress summary; derived from canonical sets |
+
+`source_program_id` is optional lineage with `ON DELETE SET NULL`; deleting a
+program must never delete canonical sessions or sets. App roles receive
+member-scoped `SELECT` only. Canonical writes are performed by private,
+fixed-search-path idempotent projectors.
+
+### Source eligibility and identity
+
+- `member_app` and `floor`: completed, not auto-completed, and at least one
+  confirmed set. Their operational session ID is the source key.
+- `teambuildr`: one canonical session per `(member_id, completed_date)`;
+  `member_tbresults.workout_id` identifies exercise blocks, not full daily
+  sessions.
+- Cross-source rows are not merged from date alone. Ambiguous overlaps and
+  legacy duplicate slots are reported for review rather than deleted.
+
+Member App completion uses `complete_member_workout_session` so the operational
+status update and history projection commit atomically. Floor completion has a
+projection trigger. TeamBuildr history is populated through a resumable,
+auditable queue.
+
+### Member read API
+
+- `get_member_workout_history` — composite-keyset timeline and rolling 30-day
+  totals.
+- `get_member_workout_history_detail` — owned session plus ordered set and note
+  snapshots.
+- `get_member_exercise_progress` — bounded daily exercise series.
+- `get_member_program_pattern_balance` — prescribed/current/last phase or
+  completed performed distribution.
+
+The six member-facing balance patterns are lower-body push/pull, horizontal
+press/pull, and vertical press/pull. Accessories and core remain in totals but
+are hidden from the radar axes.
+
+Member App canonical design:
+`docs/superpowers/specs/2026-07-14-canonical-workout-history-design.md` in the
+LR Member App repository.
 
 ---
 
