@@ -175,7 +175,7 @@
     <div class="header-title">⬡ LOCKER ROOM GYM</div>
     <div class="header-sub">DATABASE SCHEMA — NEURAL MAP</div>
   </div>
-  <span id="gen-date">Generated: 2026-07-16</span>
+  <span id="gen-date">Generated: 2026-07-17</span>
   <div id="header-right">
     <div id="welcome-msg" style="display:none">
       <div id="welcome-avatar"></div>
@@ -358,7 +358,7 @@
 // SCHEMA DATA  — run `node update-schema.js` to regenerate
 // ============================================================
 /* SCHEMA_DATA_START */
-// Auto-generated: 2026-07-16
+// Auto-generated: 2026-07-17
 // Run `node update-schema.js` to refresh
 const DOMAINS = {
   members:     { label: "Members",            color: "#00E5FF" },
@@ -381,6 +381,7 @@ const RAW_NODES = [
   { id:"admin_tickets", domain:"pm", hub:false, desc:"Admin tickets data · timestamped records" },
   { id:"adyen_settings", domain:"system", hub:false, desc:"Adyen settings data" },
   { id:"allcontacts_hubspot", domain:"crm", hub:false, desc:"Allcontacts hubspot data · timestamped records" },
+  { id:"biomap_config", domain:"health", hub:false, desc:"Biomap config data · timestamped records" },
   { id:"biomap_leads", domain:"health", hub:false, desc:"Biomap leads data · linked to member_database · timestamped records" },
   { id:"biomap_measurement_dimensions", domain:"health", hub:false, desc:"Biomap measurement data · timestamped records" },
   { id:"biomap_measurement_types", domain:"health", hub:false, desc:"Biomap measurement data · timestamped records" },
@@ -1060,32 +1061,32 @@ const RAW_LINKS = [
   { s:"mk_meta_ads_campaigns", t:"mk_integration_source_accounts", lbl:"source_account_id" },
   { s:"mk_youtube_analytics_channel_daily", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
   { s:"mk_youtube_analytics_channel_daily", t:"mk_integration_source_accounts", lbl:"source_account_id" },
-  { s:"mk_youtube_analytics_video_daily", t:"mk_integration_source_accounts", lbl:"source_account_id" },
   { s:"mk_youtube_analytics_video_daily", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
+  { s:"mk_youtube_analytics_video_daily", t:"mk_integration_source_accounts", lbl:"source_account_id" },
   { s:"mk_youtube_channel_daily", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
   { s:"mk_youtube_channel_daily", t:"mk_integration_source_accounts", lbl:"source_account_id" },
   { s:"mk_youtube_video_daily", t:"mk_integration_source_accounts", lbl:"source_account_id" },
   { s:"mk_youtube_video_daily", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
-  { s:"mk_youtube_videos", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
   { s:"mk_youtube_videos", t:"mk_integration_source_accounts", lbl:"source_account_id" },
+  { s:"mk_youtube_videos", t:"mk_integration_sync_runs", lbl:"sync_run_id" },
   { s:"payment_overdue_follow_up_activity_log", t:"staff_database", lbl:"staff_id" },
   { s:"payment_overdue_follow_up_activity_log", t:"payment_success_tracker", lbl:"payment_tracker_id" },
-  { s:"payment_overdue_follow_ups", t:"staff_database", lbl:"updated_by" },
   { s:"payment_overdue_follow_ups", t:"payment_success_tracker", lbl:"payment_tracker_id" },
+  { s:"payment_overdue_follow_ups", t:"staff_database", lbl:"updated_by" },
   { s:"payment_success_tracker", t:"member_memberships", lbl:"membership_id" },
   { s:"pm_goal_definitions", t:"staff_database", lbl:"created_by" },
   { s:"pm_goal_definitions", t:"staff_database", lbl:"archived_by" },
   { s:"pm_goal_monthly_values", t:"pm_goal_definitions", lbl:"goal_id" },
   { s:"pm_initiatives", t:"staff_database", lbl:"owner_id" },
   { s:"pm_initiatives", t:"staff_database", lbl:"deleted_by" },
-  { s:"pm_project_activity", t:"staff_database", lbl:"actor_id" },
-  { s:"pm_project_activity", t:"pm_tasks", lbl:"task_id" },
   { s:"pm_project_activity", t:"pm_projects", lbl:"project_id" },
+  { s:"pm_project_activity", t:"pm_tasks", lbl:"task_id" },
+  { s:"pm_project_activity", t:"staff_database", lbl:"actor_id" },
   { s:"pm_project_contributors", t:"staff_database", lbl:"staff_id" },
   { s:"pm_project_contributors", t:"pm_projects", lbl:"project_id" },
-  { s:"pm_project_deletions", t:"staff_database", lbl:"deleted_by" },
-  { s:"pm_project_deletions", t:"staff_database", lbl:"owner_id" },
   { s:"pm_project_deletions", t:"pm_projects", lbl:"project_id" },
+  { s:"pm_project_deletions", t:"staff_database", lbl:"owner_id" },
+  { s:"pm_project_deletions", t:"staff_database", lbl:"deleted_by" },
   { s:"pm_projects", t:"staff_database", lbl:"owner_id" },
   { s:"pm_projects", t:"staff_database", lbl:"deleted_by" },
   { s:"pm_projects", t:"staff_database", lbl:"health_updated_by" },
